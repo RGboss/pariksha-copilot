@@ -1,0 +1,352 @@
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ==============================================================
+   BOOKISH THEME DESIGN TOKENS
+   Aids in deep focus, active learning, and long study sessions.
+   ============================================================== */
+
+:root {
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-body: var(--font-serif);
+  
+  --reader-font-size: 1.05rem;
+  --reader-line-height: 1.8;
+  
+  /* DEFAULT: WARM BOOK PAPER THEME */
+  --bg-page: #FBF9F5;
+  --bg-sheet: #FFFFFF;
+  --bg-chrome: #F3EFE8;
+  --bg-subtle: #F6F3EC;
+  --bg-hover: #ECE7DE;
+  
+  --border-main: #E6E0D5;
+  --border-light: #EFEBE3;
+  --border-accent: #8C382A;
+  
+  --text-main: #24211D;
+  --text-heading: #171513;
+  --text-muted: #6B645A;
+  --text-faint: #968F84;
+  
+  --accent-primary: #8C382A;      /* Classical terracotta / book red */
+  --accent-primary-hover: #752D21;
+  --accent-tag: #F4EFEB;
+  --accent-tag-text: #7A2E22;
+  
+  --code-bg: #211E1B;
+  --code-text: #EAE5DE;
+  
+  --sheet-shadow: 0 2px 8px -2px rgba(45, 35, 20, 0.05), 0 1px 3px rgba(45, 35, 20, 0.04);
+}
+
+/* THEME 2: CRISP WHITE ACADEMIC */
+html.theme-white {
+  --bg-page: #F8FAFC;
+  --bg-sheet: #FFFFFF;
+  --bg-chrome: #F1F5F9;
+  --bg-subtle: #F8FAFC;
+  --bg-hover: #E2E8F0;
+  
+  --border-main: #E2E8F0;
+  --border-light: #F1F5F9;
+  --border-accent: #1E3A8A;
+  
+  --text-main: #1E293B;
+  --text-heading: #0F172A;
+  --text-muted: #64748B;
+  --text-faint: #94A3B8;
+  
+  --accent-primary: #1E3A8A;      /* Academic Oxford Navy */
+  --accent-primary-hover: #172554;
+  --accent-tag: #EFF6FF;
+  --accent-tag-text: #1E40AF;
+  
+  --code-bg: #0F172A;
+  --code-text: #F1F5F9;
+  
+  --sheet-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* THEME 3: WARM NIGHT / SEPIA-DARK */
+html.theme-dark {
+  --bg-page: #171615;
+  --bg-sheet: #201E1C;
+  --bg-chrome: #1B1A18;
+  --bg-subtle: #252320;
+  --bg-hover: #2C2926;
+  
+  --border-main: #332F2B;
+  --border-light: #282522;
+  --border-accent: #C49B66;
+  
+  --text-main: #DCD6CD;
+  --text-heading: #F3EFE9;
+  --text-muted: #9E968B;
+  --text-faint: #6E685E;
+  
+  --accent-primary: #C49B66;      /* Bookish brass / warm gold */
+  --accent-primary-hover: #D4AE7A;
+  --accent-tag: #2C2720;
+  --accent-tag-text: #D6A86E;
+  
+  --code-bg: #121110;
+  --code-text: #EAE6E1;
+  
+  --sheet-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* Global Base */
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: var(--reader-line-height);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Typography Family Switcher */
+body.font-sans-mode {
+  --font-body: var(--font-sans);
+}
+body.font-serif-mode {
+  --font-body: var(--font-serif);
+}
+
+/* Reader Typography Sizes */
+.reading-text-sm {
+  --reader-font-size: 0.95rem;
+  --reader-line-height: 1.7;
+}
+.reading-text-base {
+  --reader-font-size: 1.05rem;
+  --reader-line-height: 1.82;
+}
+.reading-text-lg {
+  --reader-font-size: 1.175rem;
+  --reader-line-height: 1.9;
+}
+
+/* Minimalist Paper Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* ==============================================================
+   TEXTBOOK CHAPTER READING SHEET
+   ============================================================== */
+.book-sheet {
+  background-color: var(--bg-sheet);
+  border: 1px solid var(--border-main);
+  box-shadow: var(--sheet-shadow);
+  border-radius: 0.75rem;
+  padding: 2.5rem 2rem;
+}
+
+@media (min-width: 640px) {
+  .book-sheet {
+    padding: 3.5rem 3.5rem;
+  }
+}
+
+/* ==============================================================
+   MARKDOWN ACADEMIC TEXTBOOK FORMATTING
+   ============================================================== */
+.markdown-body {
+  font-family: var(--font-body);
+  font-size: var(--reader-font-size);
+  line-height: var(--reader-line-height);
+  color: var(--text-main);
+}
+
+/* Section Headings */
+.markdown-body h1 {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  letter-spacing: -0.015em;
+  color: var(--text-heading);
+  border-bottom: 1px solid var(--border-main);
+  padding-bottom: 0.5rem;
+}
+
+.markdown-body h2 {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-top: 2.25rem;
+  margin-bottom: 0.85rem;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.markdown-body h3 {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.65rem;
+  color: var(--text-heading);
+}
+
+.markdown-body h4 {
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-muted);
+}
+
+.markdown-body p {
+  margin-bottom: 1.25rem;
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+/* Lists */
+.markdown-body ul, .markdown-body ol {
+  margin-top: 0.5rem;
+  margin-bottom: 1.35rem;
+  padding-left: 1.6rem;
+}
+.markdown-body ul {
+  list-style-type: disc;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+}
+.markdown-body li {
+  margin-bottom: 0.5rem;
+  line-height: 1.75;
+}
+
+.markdown-body strong {
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+/* Textbook Definition / Concept Blockquotes */
+.markdown-body blockquote {
+  border-left: 3px solid var(--border-accent);
+  background-color: var(--bg-subtle);
+  padding: 0.85rem 1.25rem;
+  margin: 1.5rem 0;
+  border-radius: 0 0.5rem 0.5rem 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Code & Pre Listings */
+.markdown-body pre {
+  background-color: var(--code-bg);
+  color: var(--code-text);
+  font-family: var(--font-mono);
+  padding: 1.15rem 1.35rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  border: 1px solid var(--border-main);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.markdown-body code:not(pre code) {
+  font-family: var(--font-mono);
+  background-color: var(--bg-subtle);
+  color: var(--accent-primary);
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+  border: 1px solid var(--border-light);
+}
+
+/* Academic Publication Table Styling (APA / Chicago Book Style) */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.75rem 0;
+  font-size: 0.875rem;
+  border-top: 2px solid var(--text-heading);
+  border-bottom: 2px solid var(--text-heading);
+}
+
+.markdown-body th {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--text-heading);
+  color: var(--text-heading);
+  background-color: var(--bg-subtle);
+  text-align: left;
+}
+
+.markdown-body td {
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-main);
+  line-height: 1.55;
+}
+
+.markdown-body tr:hover td {
+  background-color: var(--bg-subtle);
+}
+
+/* ==============================================================
+   BOOKISH CHECKPOINT & QUIZ CARDS
+   ============================================================== */
+.book-callout {
+  background-color: var(--bg-sheet);
+  border: 1px solid var(--border-main);
+  border-radius: 0.5rem;
+  transition: border-color 0.15s ease;
+}
+
+.book-callout:hover {
+  border-color: var(--text-faint);
+}
+
+/* Focus Reading Mode Transition */
+#mainReaderContainer {
+  transition: max-width 0.25s ease-in-out;
+}
+
+.focus-reading-active #sidebarCol {
+  display: none !important;
+}
+
+.focus-reading-active #mainReaderContainer {
+  max-width: 52rem !important; /* ~832px perfect for reading */
+  margin-left: auto;
+  margin-right: auto;
+}
