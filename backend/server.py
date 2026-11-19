@@ -1,55 +1,36 @@
+"""
+Government Exam Preparation Platform - Unified FastAPI Application Server
+"""
 import os
-import json
-import uuid
 import shutil
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
+import uuid
+import json
+import urllib.parse
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict, List, Any
 
-from backend.db import (
-    init_db,
-    get_all_progress,
-    update_chapter_progress,
-    record_quiz_attempt,
-    get_stats,
-    list_documents,
-    get_document,
-    delete_document,
-    get_chat_history,
-    clear_chat_history,
-    get_setting,
-    set_setting
+# Load environment
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+load_dotenv(dotenv_path=ENV_PATH, override=True)
+
+from backend.db_models import (
+    SessionLocal, User, Document as DocModel, StudyPlan as PlanModel,
+    ChatHistory as ChatModel, get_or_create_default_user
 )
-from backend.rag_engine import rag_service
-from backend.pdf_manager import (
-    process_and_index_pdf,
-    scan_workspace_study_pdfs,
-    import_workspace_pdf,
-    UPLOADS_DIR
-)
-
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-STATIC_DIR = os.path.join(BASE_DIR, 'static')
-
-# Initialize SQLite database
-init_db()
-
-# Load Curriculum JSON
-with open(os.path.join(DATA_DIR, 'curriculum.json'), 'r', encoding='utf-8') as f:
-    CURRICULUM = json.load(f)
-
-# Load Extracted Question Bank JSON
-with open(os.path.join(DATA_DIR, 'extracted_qas.json'), 'r', encoding='utf-8') as f:
-    QUESTION_BANK = json.load(f)
+from backend.chroma_rag import rag_service
 
 app = FastAPI(
-    title="IT Officer Exam Prep Platform API with Gemini RAG",
-    description="Backend API for SEBI Grade A, SBI SCO, and IBPS SO Progressive Preparation Hub with PDF Library & AI Tutor",
-    version="2.0.0"
+    title="Government Exam Preparation Platform & AI Tutor",
+    version="2.0.0",
+    description="Full-stack AI platform with Exam Strategy Agent, PDF Resource Manager, and ChromaDB Google RAG."
 )
 
 app.add_middleware(
@@ -60,438 +41,515 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+# Mount uploads directory for static file access
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+# Load curriculum and question banks for progressive learning
+CURRICULUM_PATH = os.path.join(BASE_DIR, "data", "curriculum.json")
+CURRICULUM = {"stages": []}
+if os.path.exists(CURRICULUM_PATH):
+    try:
+        with open(CURRICULUM_PATH, "r", encoding="utf-8") as f:
+            CURRICULUM = json.load(f)
+    except Exception as e:
+        print(f"[Server] Warning reading curriculum.json: {e}")
+
+QUESTION_BANK_PATH = os.path.join(BASE_DIR, "data", "extracted_qas.json")
+QUESTION_BANK = []
+if os.path.exists(QUESTION_BANK_PATH):
+    try:
+        with open(QUESTION_BANK_PATH, "r", encoding="utf-8") as f:
+            QUESTION_BANK = json.load(f)
+    except Exception as e:
+        print(f"[Server] Warning reading extracted_qas.json: {e}")
+
 # ==============================================================
 # PYDANTIC SCHEMAS
 # ==============================================================
 
-class ProgressUpdate(BaseModel):
-    completed: Optional[bool] = None
-    bookmarked: Optional[bool] = None
-    notes: Optional[str] = None
-
-class QuizSubmission(BaseModel):
-    answers: Dict[str, int] # question_id (as str) -> selected_option_index
+class StrategyRequest(BaseModel):
+    user_id: Optional[str] = None
+    exam_name: str
+    daily_hours: float = 4.0
+    prep_level: str = "Intermediate"
 
 class ChatRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+    mode: str = "document"  # "document" or "general"
     document_id: Optional[str] = None
-    api_key: Optional[str] = None
+    category: Optional[str] = None
+    query: str
+
+class UserUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    target_exam: Optional[str] = None
 
 class ApiKeyUpdate(BaseModel):
     api_key: str
 
-class WorkspaceImportRequest(BaseModel):
-    file_path: str
-    category: Optional[str] = "Study Material"
-
 # ==============================================================
-# CURRICULUM & PROGRESS ENDPOINTS
+# USER / PROFILE ENDPOINTS
 # ==============================================================
 
-@app.get("/api/stages")
-def get_stages(exam: Optional[str] = None):
-    """
-    Returns all stages and chapters with current user progress and quiz scores.
-    Optional filter by exam ('sebi', 'sbi', 'ibps').
-    """
-    progress_map, quiz_map = get_all_progress()
-    
-    stages_copy = []
-    for stage in CURRICULUM["stages"]:
-        filtered_chapters = []
-        for ch in stage["chapters"]:
-            if exam and exam != "all" and exam not in ch["exams"]:
-                continue
-            
-            p = progress_map.get(ch["id"], {"completed": False, "bookmarked": False, "notes": ""})
-            q = quiz_map.get(ch["id"], None)
-            
-            ch_summary = {
-                "id": ch["id"],
-                "stage_id": ch["stage_id"],
-                "number": ch["number"],
-                "title": ch["title"],
-                "exams": ch["exams"],
-                "reading_time_mins": ch["reading_time_mins"],
-                "summary": ch["summary"],
-                "completed": p["completed"],
-                "bookmarked": p["bookmarked"],
-                "quiz_score": q
-            }
-            filtered_chapters.append(ch_summary)
-            
-        if filtered_chapters or not exam:
-            stages_copy.append({
-                "id": stage["id"],
-                "number": stage["number"],
-                "title": stage["title"],
-                "badge": stage["badge"],
-                "description": stage["description"],
-                "chapters": filtered_chapters
-            })
-            
-    return {"stages": stages_copy}
+@app.get("/api/user")
+def get_user_profile():
+    user = get_or_create_default_user()
+    return user.to_dict()
 
-@app.get("/api/chapters/{chapter_id}")
-def get_chapter(chapter_id: str):
-    """
-    Returns full lesson details, notes, checkpoints, and embedded quiz.
-    """
-    found_ch = None
-    stage_info = None
-    for s in CURRICULUM["stages"]:
-        for ch in s["chapters"]:
-            if ch["id"] == chapter_id:
-                found_ch = dict(ch)
-                stage_info = {"id": s["id"], "number": s["number"], "title": s["title"]}
-                break
-        if found_ch:
-            break
-            
-    if not found_ch:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-        
-    progress_map, quiz_map = get_all_progress()
-    user_state = progress_map.get(chapter_id, {"completed": False, "bookmarked": False, "notes": ""})
-    latest_quiz = quiz_map.get(chapter_id, None)
-    
-    found_ch["stage"] = stage_info
-    found_ch["user_state"] = user_state
-    found_ch["latest_quiz_score"] = latest_quiz
-    return found_ch
-
-@app.post("/api/chapters/{chapter_id}/progress")
-def update_progress(chapter_id: str, update: ProgressUpdate):
-    """
-    Saves completion status, bookmarking, and personal notes into SQLite.
-    """
-    update_chapter_progress(
-        chapter_id,
-        completed=update.completed,
-        bookmarked=update.bookmarked,
-        notes=update.notes
-    )
-    return {"status": "success", "chapter_id": chapter_id}
-
-@app.post("/api/chapters/{chapter_id}/quiz")
-def submit_quiz(chapter_id: str, submission: QuizSubmission):
-    """
-    Evaluates submitted quiz answers, saves score in SQLite, and returns detailed explanations.
-    """
-    found_ch = None
-    for s in CURRICULUM["stages"]:
-        for ch in s["chapters"]:
-            if ch["id"] == chapter_id:
-                found_ch = ch
-                break
-        if found_ch:
-            break
-            
-    if not found_ch:
-        raise HTTPException(status_code=404, detail="Chapter not found")
-        
-    quiz_items = found_ch.get("quiz", [])
-    total = len(quiz_items)
-    correct_count = 0
-    evaluations = []
-    
-    for item in quiz_items:
-        qid_str = str(item["id"])
-        user_choice = submission.answers.get(qid_str)
-        is_correct = (user_choice == item["answer"])
-        if is_correct:
-            correct_count += 1
-            
-        evaluations.append({
-            "id": item["id"],
-            "question": item["q"],
-            "options": item["options"],
-            "correct_answer": item["answer"],
-            "user_answer": user_choice,
-            "is_correct": is_correct,
-            "explanation": item["explanation"]
-        })
-        
-    # Record in SQLite
-    record_quiz_attempt(chapter_id, correct_count, total, submission.answers)
-    
-    pct = round((correct_count / total * 100.0), 1) if total > 0 else 0.0
-    return {
-        "chapter_id": chapter_id,
-        "score": correct_count,
-        "total": total,
-        "percentage": pct,
-        "evaluations": evaluations
-    }
-
-@app.get("/api/stats")
-def get_user_stats():
-    """
-    Calculates overall progress, quiz metrics, and document library statistics.
-    """
-    total_chapters = CURRICULUM["stats"]["total_chapters"]
-    return get_stats(total_chapters)
-
-@app.get("/api/search")
-def search_curriculum(q: str = Query(..., min_length=2)):
-    """
-    Searches across all chapters, lecture notes, checkpoints, and question banks.
-    """
-    query = q.lower()
-    chapter_results = []
-    
-    for s in CURRICULUM["stages"]:
-        for ch in s["chapters"]:
-            match_title = query in ch["title"].lower()
-            match_summary = query in ch["summary"].lower()
-            match_notes = query in ch["lecture_notes"].lower()
-            if match_title or match_summary or match_notes:
-                chapter_results.append({
-                    "type": "chapter",
-                    "chapter_id": ch["id"],
-                    "number": ch["number"],
-                    "title": ch["title"],
-                    "stage_title": s["title"],
-                    "summary": ch["summary"],
-                    "exams": ch["exams"]
-                })
-                
-    qa_results = []
-    for item in QUESTION_BANK:
-        if query in item["question"].lower() or query in item["answer"].lower():
-            qa_results.append(item)
-            if len(qa_results) >= 20: # cap top 20
-                break
-                
-    return {
-        "query": q,
-        "chapters": chapter_results,
-        "questions": qa_results
-    }
-
-@app.get("/api/questions")
-def get_questions(category: Optional[str] = None, limit: int = 50, offset: int = 0):
-    """
-    Returns extracted questions & answers from PDF question banks.
-    """
-    filtered = QUESTION_BANK
-    if category and category != "all":
-        filtered = [item for item in filtered if item["category"].lower() == category.lower()]
-        
-    paged = filtered[offset : offset + limit]
-    return {
-        "total": len(filtered),
-        "limit": limit,
-        "offset": offset,
-        "questions": paged
-    }
-
-@app.get("/api/mock-exam")
-def get_mock_exam(count: int = 30, exam: Optional[str] = None):
-    """
-    Returns a randomized set of calibrated quiz questions from across curriculum chapters.
-    Supports filtering by target exam (sebi, sbi, ibps).
-    """
-    import random
-    pool = []
-    for s in CURRICULUM["stages"]:
-        for ch in s["chapters"]:
-            if exam and exam != "all" and exam not in ch.get("exams", []):
-                continue
-            for q in ch.get("quiz", []):
-                pool.append({
-                    "id": q["id"],
-                    "q": q["q"],
-                    "options": q["options"],
-                    "answer": q["answer"],
-                    "explanation": q["explanation"],
-                    "chapterId": ch["id"],
-                    "chapterTitle": ch["title"],
-                    "chapterNumber": ch["number"],
-                    "stageTitle": s["title"]
-                })
-    selected = random.sample(pool, min(count, len(pool))) if pool else []
-    return {
-        "count": len(selected),
-        "total_available": len(pool),
-        "exam_filter": exam or "all",
-        "questions": selected
-    }
+@app.put("/api/user")
+def update_user_profile(req: UserUpdateRequest):
+    session = SessionLocal()
+    try:
+        user = session.query(User).first()
+        if not user:
+            user = get_or_create_default_user()
+        if req.name:
+            user.name = req.name.strip()
+        if req.email:
+            user.email = req.email.strip()
+        if req.target_exam:
+            user.target_exam = req.target_exam.strip()
+        session.commit()
+        session.refresh(user)
+        return user.to_dict()
+    finally:
+        session.close()
 
 # ==============================================================
-# PDF LIBRARY & DOCUMENT MANAGEMENT ENDPOINTS
+# EXAM STRATEGY AI AGENT
+# ==============================================================
+
+@app.post("/api/strategy/generate")
+def generate_strategy(req: StrategyRequest):
+    session = SessionLocal()
+    try:
+        user_id = req.user_id
+        if not user_id:
+            user = session.query(User).first()
+            user_id = user.id if user else "default_aspirant_user"
+
+        strategy_md = rag_service.generate_exam_strategy(
+            exam_name=req.exam_name,
+            daily_hours=req.daily_hours,
+            prep_level=req.prep_level
+        )
+
+        plan = PlanModel(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            exam_name=req.exam_name,
+            daily_hours=req.daily_hours,
+            prep_level=req.prep_level,
+            strategy_markdown=strategy_md
+        )
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+        return plan.to_dict()
+    finally:
+        session.close()
+
+@app.get("/api/strategy/history")
+def get_strategy_history(user_id: Optional[str] = None):
+    session = SessionLocal()
+    try:
+        query = session.query(PlanModel)
+        if user_id:
+            query = query.filter(PlanModel.user_id == user_id)
+        plans = query.order_by(PlanModel.created_at.desc()).limit(10).all()
+        return [p.to_dict() for p in plans]
+    finally:
+        session.close()
+
+# ==============================================================
+# PDF RESOURCE MANAGER & EMBEDDED VIEWER
 # ==============================================================
 
 @app.get("/api/documents")
-def get_documents(category: Optional[str] = None, search: Optional[str] = None):
-    """
-    Lists all uploaded study PDFs and question banks with metadata.
-    """
-    docs = list_documents(category=category, search=search)
-    return {"total": len(docs), "documents": docs}
+def list_documents(category: Optional[str] = None, search: Optional[str] = None):
+    session = SessionLocal()
+    try:
+        query = session.query(DocModel)
+        if category and category != "all":
+            query = query.filter(DocModel.category == category)
+        if search:
+            query = query.filter(DocModel.original_filename.ilike(f"%{search}%"))
+        docs = query.order_by(DocModel.uploaded_at.desc()).all()
+        return {"documents": [d.to_dict() for d in docs], "total": len(docs)}
+    finally:
+        session.close()
 
 @app.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    category: str = Form("Study Material")
+    category: str = Form("Study Material"),
+    user_id: Optional[str] = Form(None)
 ):
-    """
-    Uploads a PDF, indexes it into chunks with vector embeddings, and generates an AI summary.
-    """
-    if not file.filename.lower().endswith('.pdf'):
+    if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    doc_id = str(uuid.uuid4())
-    stored_filename = f"{doc_id}_{file.filename}"
-    save_path = os.path.join(UPLOADS_DIR, stored_filename)
-
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+    session = SessionLocal()
     try:
-        doc = process_and_index_pdf(
-            file_path=save_path,
-            original_filename=file.filename,
+        if not user_id:
+            user = session.query(User).first()
+            user_id = user.id if user else "default_aspirant_user"
+
+        doc_id = str(uuid.uuid4())
+        safe_filename = f"{doc_id[:8]}_{file.filename.replace(' ', '_')}"
+        safe_category = category.replace(" ", "_").replace("/", "_")
+
+        user_upload_dir = os.path.join(UPLOADS_DIR, user_id, safe_category)
+        os.makedirs(user_upload_dir, exist_ok=True)
+        file_dest = os.path.join(user_upload_dir, safe_filename)
+
+        with open(file_dest, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        file_size = os.path.getsize(file_dest)
+
+        # Count pages
+        import pypdf
+        reader = pypdf.PdfReader(file_dest)
+        page_count = len(reader.pages)
+
+        # Index in ChromaDB
+        chunk_count = rag_service.index_document(
+            doc_id=doc_id,
+            file_path=file_dest,
             category=category,
-            doc_id=doc_id
+            original_filename=file.filename
         )
-        return {"status": "success", "document": doc}
-    except Exception as e:
-        if os.path.exists(save_path):
-            os.remove(save_path)
-        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
 
-@app.get("/api/documents/workspace-available")
-def get_available_workspace_pdfs():
-    """
-    Discovers all 51 IT Officer study PDFs located in the workspace directories.
-    """
-    pdfs = scan_workspace_study_pdfs()
-    return {"total": len(pdfs), "pdfs": pdfs}
+        # Auto-generate Quick Summary
+        summary = rag_service.generate_quick_summary(
+            file_path=file_dest,
+            filename=file.filename,
+            category=category
+        )
 
-@app.post("/api/documents/import-workspace")
-def import_from_workspace(req: WorkspaceImportRequest):
-    """
-    Imports and indexes an existing study PDF from the workspace.
-    """
-    try:
-        doc = import_workspace_pdf(file_path=req.file_path, category=req.category)
-        return {"status": "success", "document": doc}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to import workspace PDF: {str(e)}")
-
-@app.get("/api/documents/{doc_id}")
-def get_document_details(doc_id: str):
-    """
-    Returns document metadata and AI summary.
-    """
-    doc = get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return doc
+        doc = DocModel(
+            id=doc_id,
+            user_id=user_id,
+            filename=safe_filename,
+            original_filename=file.filename,
+            file_path=file_dest,
+            category=category,
+            summary=summary,
+            vector_collection_id="gov_exam_rag_docs",
+            page_count=page_count,
+            file_size=file_size
+        )
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
+        res = doc.to_dict()
+        res["chunk_count"] = chunk_count
+        return res
+    finally:
+        session.close()
 
 @app.get("/api/documents/{doc_id}/raw")
 def get_document_raw(doc_id: str):
-    """
-    Serves the raw PDF file for in-browser viewing.
-    """
-    doc = get_document(doc_id)
-    if not doc or not os.path.exists(doc["file_path"]):
-        raise HTTPException(status_code=404, detail="PDF file not found")
-    return FileResponse(
-        doc["file_path"],
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{doc["original_filename"]}"'}
-    )
+    session = SessionLocal()
+    try:
+        doc = session.query(DocModel).filter(DocModel.id == doc_id).first()
+        if not doc or not os.path.exists(doc.file_path):
+            raise HTTPException(status_code=404, detail="Document file not found.")
+        
+        encoded_filename = urllib.parse.quote(doc.original_filename)
+        return FileResponse(
+            path=doc.file_path,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"}
+        )
+    finally:
+        session.close()
 
 @app.delete("/api/documents/{doc_id}")
-def delete_document_endpoint(doc_id: str):
-    """
-    Deletes the PDF from disk and cleans up all vector chunks from the database.
-    """
-    success = delete_document(doc_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return {"status": "deleted", "document_id": doc_id}
+def delete_document(doc_id: str):
+    session = SessionLocal()
+    try:
+        doc = session.query(DocModel).filter(DocModel.id == doc_id).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+
+        # 1. Delete physical file from disk
+        if os.path.exists(doc.file_path):
+            try:
+                os.remove(doc.file_path)
+            except Exception as e:
+                print(f"[Server] Warning removing file {doc.file_path}: {e}")
+
+        # 2. Purge vector chunks from ChromaDB
+        rag_service.delete_document_vectors(doc_id)
+
+        # 3. Delete database record
+        session.delete(doc)
+        session.commit()
+        return {"status": "success", "deleted_id": doc_id}
+    finally:
+        session.close()
 
 # ==============================================================
-# RAG CHATBOT & EMBEDDINGS ENDPOINTS
+# WORKSPACE PDF SCANNER & 1-CLICK IMPORTER
+# ==============================================================
+
+@app.get("/api/documents/workspace-available")
+def get_available_workspace_pdfs():
+    workspace_root = os.path.dirname(BASE_DIR)
+    available = []
+    
+    for root, dirs, files in os.walk(workspace_root):
+        if "prep_platform" in root or ".git" in root or "node_modules" in root:
+            continue
+        for f in files:
+            if f.lower().endswith(".pdf"):
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, workspace_root)
+                size_kb = round(os.path.getsize(full_path) / 1024, 1)
+
+                cat = "Study Material"
+                lower = f.lower()
+                if "question" in lower or "mcq" in lower or "mock" in lower or "qna" in lower:
+                    cat = "Question Bank"
+                elif "syllabus" in lower or "strategy" in lower or "pattern" in lower:
+                    cat = "Syllabus & Pattern"
+                elif "previous" in lower or "pyq" in lower or "solved" in lower:
+                    cat = "Previous Year Paper"
+
+                available.append({
+                    "filename": f,
+                    "rel_path": rel_path,
+                    "full_path": full_path,
+                    "size_kb": size_kb,
+                    "suggested_category": cat
+                })
+
+    return {"available": available, "total": len(available)}
+
+@app.post("/api/documents/import-workspace")
+def import_workspace_document(full_path: str = Form(...), category: str = Form("Study Material")):
+    if not os.path.exists(full_path) or not full_path.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Specified workspace file does not exist or is not a PDF.")
+
+    session = SessionLocal()
+    try:
+        user = session.query(User).first()
+        user_id = user.id if user else "default_aspirant_user"
+
+        filename = os.path.basename(full_path)
+        doc_id = str(uuid.uuid4())
+        safe_filename = f"{doc_id[:8]}_{filename.replace(' ', '_')}"
+        safe_category = category.replace(" ", "_").replace("/", "_")
+
+        user_upload_dir = os.path.join(UPLOADS_DIR, user_id, safe_category)
+        os.makedirs(user_upload_dir, exist_ok=True)
+        dest_path = os.path.join(user_upload_dir, safe_filename)
+
+        shutil.copy2(full_path, dest_path)
+        file_size = os.path.getsize(dest_path)
+
+        import pypdf
+        reader = pypdf.PdfReader(dest_path)
+        page_count = len(reader.pages)
+
+        # Index in ChromaDB
+        rag_service.index_document(
+            doc_id=doc_id,
+            file_path=dest_path,
+            category=category,
+            original_filename=filename
+        )
+
+        summary = rag_service.generate_quick_summary(
+            file_path=dest_path,
+            filename=filename,
+            category=category
+        )
+
+        doc = DocModel(
+            id=doc_id,
+            user_id=user_id,
+            filename=safe_filename,
+            original_filename=filename,
+            file_path=dest_path,
+            category=category,
+            summary=summary,
+            vector_collection_id="gov_exam_rag_docs",
+            page_count=page_count,
+            file_size=file_size
+        )
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
+        return doc.to_dict()
+    finally:
+        session.close()
+
+# ==============================================================
+# RAG-POWERED AI CHATBOT
 # ==============================================================
 
 @app.post("/api/chat")
-def chat_with_tutor(req: ChatRequest):
-    """
-    Executes RAG Q&A grounded in document vector embeddings.
-    """
-    session_id = req.session_id or str(uuid.uuid4())
-    result = rag_service.answer_query(
-        query=req.query,
-        session_id=session_id,
-        doc_id=req.document_id,
-        api_key=req.api_key
-    )
-    return result
+def chat_with_ai(req: ChatRequest):
+    session = SessionLocal()
+    try:
+        user_id = req.user_id
+        if not user_id:
+            user = session.query(User).first()
+            user_id = user.id if user else "default_aspirant_user"
+
+        # Save user message
+        user_msg = ChatModel(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            document_id=req.document_id,
+            role="user",
+            content=req.query
+        )
+        session.add(user_msg)
+        session.commit()
+
+        # Execute Query
+        if req.mode == "general":
+            res = rag_service.answer_general_mentor_query(req.query)
+        else:
+            res = rag_service.answer_rag_query(
+                query=req.query,
+                doc_id=req.document_id,
+                category=req.category
+            )
+
+        # Save assistant message with citation metadata
+        assistant_msg = ChatModel(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            document_id=req.document_id,
+            role="assistant",
+            content=res["answer"],
+            sources_json=json.dumps(res.get("sources", []))
+        )
+        session.add(assistant_msg)
+        session.commit()
+
+        return {
+            "answer": res["answer"],
+            "sources": res.get("sources", []),
+            "model": res.get("model", "gemini-2.5-flash"),
+            "mode": req.mode
+        }
+    finally:
+        session.close()
 
 @app.get("/api/chat/history")
-def get_history(session_id: str = Query(...)):
-    """
-    Fetches conversational chat history for a session.
-    """
-    history = get_chat_history(session_id)
-    return {"session_id": session_id, "messages": history}
+def get_chat_history(document_id: Optional[str] = None, user_id: Optional[str] = None):
+    session = SessionLocal()
+    try:
+        query = session.query(ChatModel)
+        if user_id:
+            query = query.filter(ChatModel.user_id == user_id)
+        if document_id:
+            query = query.filter(ChatModel.document_id == document_id)
+        else:
+            query = query.filter(ChatModel.document_id.is_(None))
+        messages = query.order_by(ChatModel.timestamp.asc()).all()
+        return {"messages": [m.to_dict() for m in messages]}
+    finally:
+        session.close()
 
 @app.delete("/api/chat/history")
-def clear_history(session_id: str = Query(...)):
-    """
-    Clears messages for the specified session.
-    """
-    clear_chat_history(session_id)
-    return {"status": "cleared", "session_id": session_id}
+def clear_chat_history(document_id: Optional[str] = None):
+    session = SessionLocal()
+    try:
+        query = session.query(ChatModel)
+        if document_id:
+            query = query.filter(ChatModel.document_id == document_id)
+        else:
+            query = query.filter(ChatModel.document_id.is_(None))
+        query.delete(synchronize_session=False)
+        session.commit()
+        return {"status": "cleared"}
+    finally:
+        session.close()
 
 # ==============================================================
-# SETTINGS & API KEY CONFIGURATION
+# SETTINGS & API KEY
 # ==============================================================
 
 @app.get("/api/settings/status")
 def get_settings_status():
-    """
-    Checks if Google Gemini API key is configured and valid.
-    """
-    is_active = rag_service.is_configured()
-    active_key = rag_service.get_api_key()
-    masked_key = f"{active_key[:6]}...{active_key[-4:]}" if active_key and len(active_key) > 10 else None
+    active_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    is_active = len(active_key) > 15
+    masked = f"{active_key[:6]}...{active_key[-4:]}" if is_active else None
     return {
         "gemini_api_configured": is_active,
-        "masked_key": masked_key,
+        "masked_key": masked,
         "embedding_model": rag_service.embedding_model,
-        "chat_model": rag_service.chat_model
+        "chat_model": rag_service.active_chat_model,
+        "candidate_models": rag_service.candidate_models
     }
 
 @app.post("/api/settings/api-key")
 def update_api_key(req: ApiKeyUpdate):
-    """
-    Saves user-provided Gemini API key in SQLite and updates the active runtime.
-    """
     key = req.api_key.strip()
-    if not key or len(key) < 15:
-        raise HTTPException(status_code=400, detail="Invalid Gemini API Key format.")
+    if len(key) < 15:
+        raise HTTPException(status_code=400, detail="Invalid Gemini API key.")
     
-    set_setting("gemini_api_key", key)
-    # Also attempt writing to .env file if feasible
-    env_file = os.path.join(BASE_DIR, '.env')
-    try:
-        with open(env_file, 'w', encoding='utf-8') as f:
-            f.write(f"GEMINI_API_KEY={key}\n")
-    except Exception:
-        pass
-        
-    rag_service._cached_client = None # Reset cached client
-    return {"status": "success", "message": "Gemini API key saved and activated successfully."}
+    os.environ["GEMINI_API_KEY"] = key
+    rag_service._load_client()
+    return {"status": "updated", "gemini_configured": rag_service.is_configured()}
 
-# Serve static frontend files
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+# ==============================================================
+# CURRICULUM & QUESTIONS PRESERVATION
+# ==============================================================
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("backend.server:app", host="127.0.0.1", port=8000, reload=True)
+@app.get("/api/curriculum")
+def get_curriculum():
+    return CURRICULUM
+
+@app.get("/api/stages")
+def get_stages():
+    return {"stages": CURRICULUM.get("stages", [])}
+
+@app.get("/api/chapters/{chapter_id}")
+def get_chapter(chapter_id: str):
+    for s in CURRICULUM.get("stages", []):
+        for ch in s.get("chapters", []):
+            if ch.get("id") == chapter_id:
+                return ch
+    raise HTTPException(status_code=404, detail="Chapter not found.")
+
+@app.get("/api/questions")
+def get_questions(category: Optional[str] = None, limit: int = 50, offset: int = 0):
+    filtered = QUESTION_BANK
+    if category and category != "all":
+        filtered = [x for x in filtered if x.get("category", "").lower() == category.lower()]
+    return {
+        "total": len(filtered),
+        "limit": limit,
+        "offset": offset,
+        "questions": filtered[offset: offset + limit]
+    }
+
+# ==============================================================
+# STATIC MOUNT & ROOT ROUTE
+# ==============================================================
+
+# Check if Vite frontend dist directory exists
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
+STATIC_LEGACY = os.path.join(BASE_DIR, "static")
+
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+    @app.get("/")
+    def serve_frontend():
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+elif os.path.exists(STATIC_LEGACY):
+    app.mount("/static", StaticFiles(directory=STATIC_LEGACY), name="static")
+    @app.get("/")
+    def serve_legacy_frontend():
+        return FileResponse(os.path.join(STATIC_LEGACY, "index.html"))
