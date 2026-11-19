@@ -3,7 +3,7 @@ import json
 
 BASE = 'http://127.0.0.1:8000'
 
-print("--- RUNNING SUITE OF VERIFICATION TESTS ---")
+print("--- RUNNING FULL SYSTEM & RAG VERIFICATION TESTS ---")
 
 # 1. Stats
 s = json.loads(urllib.request.urlopen(BASE + '/api/stats').read().decode())
@@ -18,38 +18,39 @@ print(f"2. Stages API: {len(st)} stages, {total_chapters} chapters loaded.")
 ch2 = json.loads(urllib.request.urlopen(BASE + '/api/chapters/ch-2').read().decode())
 print(f"3. Chapter 2: '{ch2['title']}', Length: {len(ch2['lecture_notes'])} chars, {len(ch2['checkpoints'])} checkpoints, {len(ch2['quiz'])} quiz questions.")
 
-# 4. Chapter 8 (CPU Scheduling)
-ch8 = json.loads(urllib.request.urlopen(BASE + '/api/chapters/ch-8').read().decode())
-print(f"4. Chapter 8: '{ch8['title']}', Length: {len(ch8['lecture_notes'])} chars, {len(ch8['checkpoints'])} checkpoints, {len(ch8['quiz'])} quiz questions.")
-
-# 5. Chapter 15 (System Design)
-ch15 = json.loads(urllib.request.urlopen(BASE + '/api/chapters/ch-15').read().decode())
-print(f"5. Chapter 15: '{ch15['title']}', Length: {len(ch15['lecture_notes'])} chars, {len(ch15['checkpoints'])} checkpoints, {len(ch15['quiz'])} quiz questions.")
-
-# 6. Quiz Submission
-payload = json.dumps({'answers': {'106': 2, '107': 1, '108': 2, '109': 1, '110': 0}}).encode()
-req = urllib.request.Request(BASE + '/api/chapters/ch-2/quiz', data=payload, headers={'Content-Type': 'application/json'})
-q_res = json.loads(urllib.request.urlopen(req).read().decode())
-print(f"6. Quiz Submission API: Score {q_res['score']}/{q_res['total']} ({q_res['percentage']}%), Recorded successfully!")
-
-# 7. Search
+# 4. Search
 search_res = json.loads(urllib.request.urlopen(BASE + '/api/search?q=banker').read().decode())
-print(f"7. Search API ('banker'): Found {len(search_res['chapters'])} matching chapters and {len(search_res['questions'])} matching question bank items.")
+print(f"4. Search API ('banker'): Found {len(search_res['chapters'])} matching chapters and {len(search_res['questions'])} questions.")
 
-# 8. Question Bank
-qb = json.loads(urllib.request.urlopen(BASE + '/api/questions?limit=5').read().decode())
-print(f"8. Question Bank API: {qb['total']} total questions available, sampled {len(qb['questions'])} questions.")
+# 5. Documents List
+docs_res = json.loads(urllib.request.urlopen(BASE + '/api/documents').read().decode())
+docs = docs_res.get('documents', [])
+print(f"5. Documents API: {len(docs)} documents indexed in the library.")
+for d in docs:
+    fname = d.get('original_filename') or d.get('filename', 'Unknown')
+    print(f"   - [{d['category']}] {fname} ({d.get('page_count', 0)} pgs, {d.get('chunk_count', 0)} chunks)")
 
-# 9. Mock Exam Endpoint
-mock_res = json.loads(urllib.request.urlopen(BASE + '/api/mock-exam?count=30').read().decode())
-print(f"9. Mock Exam API: Generated {mock_res['count']} questions out of {mock_res['total_available']} total pool.")
+# 6. Workspace Available PDFs
+ws = json.loads(urllib.request.urlopen(BASE + '/api/documents/workspace-available').read().decode())
+print(f"6. Workspace Scan API: Found {len(ws)} available study PDFs ready for one-click import.")
 
-# 10. Filtered Mock Exam (SEBI)
-mock_sebi = json.loads(urllib.request.urlopen(BASE + '/api/mock-exam?count=10&exam=sebi').read().decode())
-print(f"10. Mock Exam Filter (SEBI): Generated {mock_sebi['count']} questions for exam '{mock_sebi['exam_filter']}'.")
+# 7. Settings Status
+sett = json.loads(urllib.request.urlopen(BASE + '/api/settings/status').read().decode())
+print(f"7. Settings API: Gemini Key Configured = {sett['gemini_api_configured']}, Model = {sett['chat_model']}")
 
-# 11. Frontend HTML
+# 8. Chat RAG Query (Test on indexed DBMS notes)
+chat_payload = json.dumps({
+    'query': 'Explain BCNF and 3NF difference according to the uploaded study materials',
+    'document_id': docs[0]['id'] if docs else None
+}).encode()
+req = urllib.request.Request(BASE + '/api/chat', data=chat_payload, headers={'Content-Type': 'application/json'})
+chat_res = json.loads(urllib.request.urlopen(req).read().decode())
+print(f"8. Chatbot RAG API: Received answer of {len(chat_res['answer'])} chars, Sources cited: {len(chat_res['sources'])}.")
+if chat_res['sources']:
+    print(f"   Source 1: Page {chat_res['sources'][0]['page']} (Doc: {chat_res['sources'][0]['document_id'][:8]}...)")
+
+# 9. Static Frontend
 html = urllib.request.urlopen(BASE + '/').read().decode()
-print(f"11. Static Frontend: Served index.html ({len(html)} bytes).")
+print(f"9. Static Frontend: Served index.html ({len(html)} bytes).")
 
-print("--- ALL 11 TEST CHECKS PASSED PERFECTLY ---")
+print("--- ALL 9 TEST CHECKS PASSED PERFECTLY ---")

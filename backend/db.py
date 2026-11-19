@@ -251,15 +251,20 @@ def get_document(doc_id: str) -> Optional[Dict[str, Any]]:
 def list_documents(category: Optional[str] = None, search: Optional[str] = None) -> List[Dict[str, Any]]:
     conn = get_connection()
     c = conn.cursor()
-    query = 'SELECT * FROM uploaded_documents WHERE 1=1'
+    query = '''
+        SELECT d.*, COUNT(c.id) AS chunk_count
+        FROM uploaded_documents d
+        LEFT JOIN document_chunks c ON d.id = c.document_id
+        WHERE 1=1
+    '''
     params = []
     if category and category != 'all':
-        query += ' AND category = ?'
+        query += ' AND d.category = ?'
         params.append(category)
     if search:
-        query += ' AND (original_filename LIKE ? OR summary LIKE ?)'
+        query += ' AND (d.original_filename LIKE ? OR d.summary LIKE ?)'
         params.extend([f'%{search}%', f'%{search}%'])
-    query += ' ORDER BY created_at DESC'
+    query += ' GROUP BY d.id ORDER BY d.created_at DESC'
     c.execute(query, params)
     rows = c.fetchall()
     conn.close()
