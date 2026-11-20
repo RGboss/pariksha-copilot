@@ -143,9 +143,9 @@ class ChromaRAGService:
 
         return chunks
 
-    def index_document(self, doc_id: str, file_path: str, category: str, original_filename: str) -> int:
+    def index_document(self, doc_id: str, file_path: str, category: str, original_filename: str, user_id: str = "default_user") -> int:
         """
-        Extracts, embeds, and registers PDF chunks into ChromaDB.
+        Extracts, embeds, and registers PDF chunks into ChromaDB with user isolation.
         """
         chunks = self.extract_and_chunk_pdf(file_path)
         if not chunks:
@@ -164,6 +164,7 @@ class ChromaRAGService:
             documents.append(c['text'])
             metadatas.append({
                 "doc_id": doc_id,
+                "user_id": user_id,
                 "page_number": c["page_number"],
                 "category": category,
                 "filename": original_filename
@@ -321,19 +322,23 @@ class ChromaRAGService:
             user_note = "Your Google Gemini API Key was reported as leaked/invalid by Google AI Studio. Update with a fresh key to enable live cloud generation." if "leaked" in err_msg.lower() or "403" in err_msg else f"API Notice: {err_msg}"
             return self._build_rich_strategy_blueprint(exam_name, daily_hours, prep_level, api_error_note=user_note)
 
-    def answer_rag_query(self, query: str, doc_id: Optional[str] = None, category: Optional[str] = None) -> Dict[str, Any]:
+    def answer_rag_query(self, query: str, doc_id: Optional[str] = None, category: Optional[str] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes hybrid vector retrieval in ChromaDB and generates an answer with source citations.
-        Supports single-document focus or category-wide search.
+        Supports single-document focus or user/category-scoped search.
         """
         query_vec = self.get_embedding(query)
         
-        # Build ChromaDB where filter
+        # Build ChromaDB where filter with user isolation
         where_filter = None
         if doc_id:
             where_filter = {"doc_id": doc_id}
+        elif category and category != "all" and user_id:
+            where_filter = {"$and": [{"user_id": user_id}, {"category": category}]}
         elif category and category != "all":
             where_filter = {"category": category}
+        elif user_id:
+            where_filter = {"user_id": user_id}
 
         query_args = {
             "query_embeddings": [query_vec],

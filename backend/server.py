@@ -1,5 +1,6 @@
 """
 Government Exam Preparation Platform - Unified FastAPI Application Server
+With Full User Authentication, Account Creation & Isolated User Data
 """
 import os
 import shutil
@@ -10,7 +11,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,14 +24,16 @@ load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 from backend.db_models import (
     SessionLocal, User, Document as DocModel, StudyPlan as PlanModel,
-    ChatHistory as ChatModel, get_or_create_default_user
+    ChatHistory as ChatModel, UserSession,
+    hash_password, verify_password, create_user_session,
+    get_user_from_token, delete_user_session, seed_demo_user
 )
 from backend.chroma_rag import rag_service
 
 app = FastAPI(
     title="Government Exam Preparation Platform & AI Tutor",
-    version="2.0.0",
-    description="Full-stack AI platform with Exam Strategy Agent, PDF Resource Manager, and ChromaDB Google RAG."
+    version="2.1.0",
+    description="Full-stack AI platform with Multi-User Authentication, PDF Resource Manager, and ChromaDB RAG."
 )
 
 app.add_middleware(
@@ -70,14 +73,22 @@ if os.path.exists(QUESTION_BANK_PATH):
 # PYDANTIC SCHEMAS
 # ==============================================================
 
+class SignupRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    target_exam: str = "SEBI Grade A (IT Stream)"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 class StrategyRequest(BaseModel):
-    user_id: Optional[str] = None
     exam_name: str
     daily_hours: float = 4.0
     prep_level: str = "Intermediate"
 
 class ChatRequest(BaseModel):
-    user_id: Optional[str] = None
     mode: str = "document"  # "document" or "general"
     document_id: Optional[str] = None
     category: Optional[str] = None
@@ -85,32 +96,124 @@ class ChatRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
-    email: Optional[str] = None
     target_exam: Optional[str] = None
 
 class ApiKeyUpdate(BaseModel):
     api_key: str
 
 # ==============================================================
-# USER / PROFILE ENDPOINTS
+# AUTHENTICATION DEPENDENCY & HELPERS
 # ==============================================================
 
-@app.get("/api/user")
-def get_user_profile():
-    user = get_or_create_default_user()
-    return user.to_dict()
+def get_current_user(request: Request) -> User:
+    """Extracts bearer session token and validates user session."""
+    auth_header = request.headers.get("Authorization")
+    token = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.query_params.get("token")
 
-@app.put("/api/user")
-def update_user_profile(req: UserUpdateRequest):
+    if token:
+        user = get_user_from_token(token)
+        if user:
+            return user
+
+    raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+
+def get_optional_user(request: Request) -> Optional[User]:
+    """Tolerant user extractor for public endpoints."""
+    try:
+        return get_current_user(request)
+    except Exception:
+        return None
+
+# ==============================================================
+# AUTHENTICATION & ACCOUNT ENDPOINTS
+# ==============================================================
+
+@app.post("/api/auth/signup")
+def signup(req: SignupRequest):
     session = SessionLocal()
     try:
-        user = session.query(User).first()
+        email = req.email.strip().lower()
+        if not email or "@" not in email or "." not in email:
+            raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+        if len(req.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+
+        existing = session.query(User).filter(User.email == email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="An account with this email already exists.")
+
+        pw_hash, salt = hash_password(req.password)
+        new_user = User(
+            id=str(uuid.uuid4()),
+            name=req.name.strip() or "Aspirant",
+            email=email,
+            password_hash=pw_hash,
+            salt=salt,
+            target_exam=req.target_exam.strip() or "SEBI Grade A (IT Stream)"
+        )
+        session.add(new_user)
+        session.commit()
+        session.refresh(new_user)
+        user_dict = new_user.to_dict()
+
+        token = create_user_session(new_user.id)
+        return {
+            "token": token,
+            "user": user_dict
+        }
+    finally:
+        session.close()
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    session = SessionLocal()
+    try:
+        email = req.email.strip().lower()
+        user = session.query(User).filter(User.email == email).first()
+        if not user or not user.password_hash or not user.salt:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+        if not verify_password(req.password, user.salt, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+        user_dict = user.to_dict()
+        token = create_user_session(user.id)
+        return {
+            "token": token,
+            "user": user_dict
+        }
+    finally:
+        session.close()
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        delete_user_session(token)
+    return {"status": "logged_out"}
+
+@app.get("/api/auth/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    return {"user": current_user.to_dict()}
+
+@app.get("/api/user")
+def get_user_profile(current_user: User = Depends(get_current_user)):
+    return current_user.to_dict()
+
+@app.put("/api/user")
+def update_user_profile(req: UserUpdateRequest, current_user: User = Depends(get_current_user)):
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.id == current_user.id).first()
         if not user:
-            user = get_or_create_default_user()
+            raise HTTPException(status_code=404, detail="User not found.")
         if req.name:
             user.name = req.name.strip()
-        if req.email:
-            user.email = req.email.strip()
         if req.target_exam:
             user.target_exam = req.target_exam.strip()
         session.commit()
@@ -120,18 +223,13 @@ def update_user_profile(req: UserUpdateRequest):
         session.close()
 
 # ==============================================================
-# EXAM STRATEGY AI AGENT
+# EXAM STRATEGY AI AGENT (USER-ISOLATED)
 # ==============================================================
 
 @app.post("/api/strategy/generate")
-def generate_strategy(req: StrategyRequest):
+def generate_strategy(req: StrategyRequest, current_user: User = Depends(get_current_user)):
     session = SessionLocal()
     try:
-        user_id = req.user_id
-        if not user_id:
-            user = session.query(User).first()
-            user_id = user.id if user else "default_aspirant_user"
-
         strategy_md = rag_service.generate_exam_strategy(
             exam_name=req.exam_name,
             daily_hours=req.daily_hours,
@@ -140,7 +238,7 @@ def generate_strategy(req: StrategyRequest):
 
         plan = PlanModel(
             id=str(uuid.uuid4()),
-            user_id=user_id,
+            user_id=current_user.id,
             exam_name=req.exam_name,
             daily_hours=req.daily_hours,
             prep_level=req.prep_level,
@@ -154,26 +252,29 @@ def generate_strategy(req: StrategyRequest):
         session.close()
 
 @app.get("/api/strategy/history")
-def get_strategy_history(user_id: Optional[str] = None):
+def get_strategy_history(current_user: User = Depends(get_current_user)):
     session = SessionLocal()
     try:
-        query = session.query(PlanModel)
-        if user_id:
-            query = query.filter(PlanModel.user_id == user_id)
-        plans = query.order_by(PlanModel.created_at.desc()).limit(10).all()
+        plans = session.query(PlanModel).filter(
+            PlanModel.user_id == current_user.id
+        ).order_by(PlanModel.created_at.desc()).limit(10).all()
         return [p.to_dict() for p in plans]
     finally:
         session.close()
 
 # ==============================================================
-# PDF RESOURCE MANAGER & EMBEDDED VIEWER
+# PDF RESOURCE MANAGER & EMBEDDED VIEWER (USER-ISOLATED)
 # ==============================================================
 
 @app.get("/api/documents")
-def list_documents(category: Optional[str] = None, search: Optional[str] = None):
+def list_documents(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     session = SessionLocal()
     try:
-        query = session.query(DocModel)
+        query = session.query(DocModel).filter(DocModel.user_id == current_user.id)
         if category and category != "all":
             query = query.filter(DocModel.category == category)
         if search:
@@ -187,22 +288,18 @@ def list_documents(category: Optional[str] = None, search: Optional[str] = None)
 async def upload_document(
     file: UploadFile = File(...),
     category: str = Form("Study Material"),
-    user_id: Optional[str] = Form(None)
+    current_user: User = Depends(get_current_user)
 ):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
     session = SessionLocal()
     try:
-        if not user_id:
-            user = session.query(User).first()
-            user_id = user.id if user else "default_aspirant_user"
-
         doc_id = str(uuid.uuid4())
         safe_filename = f"{doc_id[:8]}_{file.filename.replace(' ', '_')}"
         safe_category = category.replace(" ", "_").replace("/", "_")
 
-        user_upload_dir = os.path.join(UPLOADS_DIR, user_id, safe_category)
+        user_upload_dir = os.path.join(UPLOADS_DIR, current_user.id, safe_category)
         os.makedirs(user_upload_dir, exist_ok=True)
         file_dest = os.path.join(user_upload_dir, safe_filename)
 
@@ -211,17 +308,17 @@ async def upload_document(
 
         file_size = os.path.getsize(file_dest)
 
-        # Count pages
         import pypdf
         reader = pypdf.PdfReader(file_dest)
         page_count = len(reader.pages)
 
-        # Index in ChromaDB
+        # Index in ChromaDB with user isolation
         chunk_count = rag_service.index_document(
             doc_id=doc_id,
             file_path=file_dest,
             category=category,
-            original_filename=file.filename
+            original_filename=file.filename,
+            user_id=current_user.id
         )
 
         # Auto-generate Quick Summary
@@ -233,7 +330,7 @@ async def upload_document(
 
         doc = DocModel(
             id=doc_id,
-            user_id=user_id,
+            user_id=current_user.id,
             filename=safe_filename,
             original_filename=file.filename,
             file_path=file_dest,
@@ -253,10 +350,24 @@ async def upload_document(
         session.close()
 
 @app.get("/api/documents/{doc_id}/raw")
-def get_document_raw(doc_id: str):
+def get_document_raw(doc_id: str, request: Request):
+    # Allow token from query param or header for <iframe> embedded viewers
+    token = request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+    user = get_user_from_token(token) if token else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
     session = SessionLocal()
     try:
-        doc = session.query(DocModel).filter(DocModel.id == doc_id).first()
+        doc = session.query(DocModel).filter(
+            DocModel.id == doc_id,
+            DocModel.user_id == user.id
+        ).first()
         if not doc or not os.path.exists(doc.file_path):
             raise HTTPException(status_code=404, detail="Document file not found.")
         
@@ -270,10 +381,13 @@ def get_document_raw(doc_id: str):
         session.close()
 
 @app.delete("/api/documents/{doc_id}")
-def delete_document(doc_id: str):
+def delete_document(doc_id: str, current_user: User = Depends(get_current_user)):
     session = SessionLocal()
     try:
-        doc = session.query(DocModel).filter(DocModel.id == doc_id).first()
+        doc = session.query(DocModel).filter(
+            DocModel.id == doc_id,
+            DocModel.user_id == current_user.id
+        ).first()
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -299,7 +413,7 @@ def delete_document(doc_id: str):
 # ==============================================================
 
 @app.get("/api/documents/workspace-available")
-def get_available_workspace_pdfs():
+def get_available_workspace_pdfs(current_user: User = Depends(get_current_user)):
     workspace_root = os.path.dirname(BASE_DIR)
     available = []
     
@@ -332,21 +446,22 @@ def get_available_workspace_pdfs():
     return {"available": available, "total": len(available)}
 
 @app.post("/api/documents/import-workspace")
-def import_workspace_document(full_path: str = Form(...), category: str = Form("Study Material")):
+def import_workspace_document(
+    full_path: str = Form(...),
+    category: str = Form("Study Material"),
+    current_user: User = Depends(get_current_user)
+):
     if not os.path.exists(full_path) or not full_path.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Specified workspace file does not exist or is not a PDF.")
 
     session = SessionLocal()
     try:
-        user = session.query(User).first()
-        user_id = user.id if user else "default_aspirant_user"
-
         filename = os.path.basename(full_path)
         doc_id = str(uuid.uuid4())
         safe_filename = f"{doc_id[:8]}_{filename.replace(' ', '_')}"
         safe_category = category.replace(" ", "_").replace("/", "_")
 
-        user_upload_dir = os.path.join(UPLOADS_DIR, user_id, safe_category)
+        user_upload_dir = os.path.join(UPLOADS_DIR, current_user.id, safe_category)
         os.makedirs(user_upload_dir, exist_ok=True)
         dest_path = os.path.join(user_upload_dir, safe_filename)
 
@@ -357,12 +472,13 @@ def import_workspace_document(full_path: str = Form(...), category: str = Form("
         reader = pypdf.PdfReader(dest_path)
         page_count = len(reader.pages)
 
-        # Index in ChromaDB
+        # Index in ChromaDB with user isolation
         rag_service.index_document(
             doc_id=doc_id,
             file_path=dest_path,
             category=category,
-            original_filename=filename
+            original_filename=filename,
+            user_id=current_user.id
         )
 
         summary = rag_service.generate_quick_summary(
@@ -373,7 +489,7 @@ def import_workspace_document(full_path: str = Form(...), category: str = Form("
 
         doc = DocModel(
             id=doc_id,
-            user_id=user_id,
+            user_id=current_user.id,
             filename=safe_filename,
             original_filename=filename,
             file_path=dest_path,
@@ -391,22 +507,17 @@ def import_workspace_document(full_path: str = Form(...), category: str = Form("
         session.close()
 
 # ==============================================================
-# RAG-POWERED AI CHATBOT
+# RAG-POWERED AI CHATBOT (USER-ISOLATED)
 # ==============================================================
 
 @app.post("/api/chat")
-def chat_with_ai(req: ChatRequest):
+def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user)):
     session = SessionLocal()
     try:
-        user_id = req.user_id
-        if not user_id:
-            user = session.query(User).first()
-            user_id = user.id if user else "default_aspirant_user"
-
         # Save user message
         user_msg = ChatModel(
             id=str(uuid.uuid4()),
-            user_id=user_id,
+            user_id=current_user.id,
             document_id=req.document_id,
             role="user",
             content=req.query
@@ -414,20 +525,21 @@ def chat_with_ai(req: ChatRequest):
         session.add(user_msg)
         session.commit()
 
-        # Execute Query
+        # Execute Query with User Scoping
         if req.mode == "general":
             res = rag_service.answer_general_mentor_query(req.query)
         else:
             res = rag_service.answer_rag_query(
                 query=req.query,
                 doc_id=req.document_id,
-                category=req.category
+                category=req.category,
+                user_id=current_user.id
             )
 
         # Save assistant message with citation metadata
         assistant_msg = ChatModel(
             id=str(uuid.uuid4()),
-            user_id=user_id,
+            user_id=current_user.id,
             document_id=req.document_id,
             role="assistant",
             content=res["answer"],
@@ -446,12 +558,13 @@ def chat_with_ai(req: ChatRequest):
         session.close()
 
 @app.get("/api/chat/history")
-def get_chat_history(document_id: Optional[str] = None, user_id: Optional[str] = None):
+def get_chat_history(
+    document_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     session = SessionLocal()
     try:
-        query = session.query(ChatModel)
-        if user_id:
-            query = query.filter(ChatModel.user_id == user_id)
+        query = session.query(ChatModel).filter(ChatModel.user_id == current_user.id)
         if document_id:
             query = query.filter(ChatModel.document_id == document_id)
         else:
@@ -462,10 +575,13 @@ def get_chat_history(document_id: Optional[str] = None, user_id: Optional[str] =
         session.close()
 
 @app.delete("/api/chat/history")
-def clear_chat_history(document_id: Optional[str] = None):
+def clear_chat_history(
+    document_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     session = SessionLocal()
     try:
-        query = session.query(ChatModel)
+        query = session.query(ChatModel).filter(ChatModel.user_id == current_user.id)
         if document_id:
             query = query.filter(ChatModel.document_id == document_id)
         else:
@@ -494,7 +610,7 @@ def get_settings_status():
     }
 
 @app.post("/api/settings/api-key")
-def update_api_key(req: ApiKeyUpdate):
+def update_api_key(req: ApiKeyUpdate, current_user: User = Depends(get_current_user)):
     key = req.api_key.strip()
     if len(key) < 15:
         raise HTTPException(status_code=400, detail="Invalid Gemini API key.")
@@ -504,7 +620,7 @@ def update_api_key(req: ApiKeyUpdate):
     return {"status": "updated", "gemini_configured": rag_service.is_configured()}
 
 # ==============================================================
-# CURRICULUM & QUESTIONS PRESERVATION
+# CURRICULUM & QUESTIONS PRESERVATION (PUBLIC)
 # ==============================================================
 
 @app.get("/api/curriculum")
@@ -539,7 +655,6 @@ def get_questions(category: Optional[str] = None, limit: int = 50, offset: int =
 # STATIC MOUNT & ROOT ROUTE
 # ==============================================================
 
-# Check if Vite frontend dist directory exists
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 STATIC_LEGACY = os.path.join(BASE_DIR, "static")
 

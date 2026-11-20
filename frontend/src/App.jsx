@@ -7,27 +7,43 @@ import {
   UploadCloud,
   FolderPlus,
   Trash2,
-  ExternalLink,
   Search,
   Sparkles,
   ChevronRight,
-  Clock,
-  CheckCircle,
-  HelpCircle,
   Settings,
-  Layers,
   ArrowLeft,
   Send,
-  AlertCircle,
   X,
-  FileCheck
+  User,
+  LogOut,
+  Lock,
+  Mail,
+  GraduationCap,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 
 export default function App() {
+  // Authentication State
+  const [token, setToken] = useState(() => localStorage.getItem('gov_exam_auth_token') || '');
+  const [user, setUser] = useState(null);
+  const [authView, setAuthView] = useState('login'); // 'login' or 'signup'
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  // Sign In / Sign Up Form State
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [signupName, setSignupName] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupTargetExam, setSignupTargetExam] = useState('SEBI Grade A (IT Stream)');
+
+  // Main App Navigation State
   const [activeTab, setActiveTab] = useState('strategy'); // 'strategy', 'library', 'chat'
-  const [user, setUser] = useState({ name: 'Aspirant Rahul', target_exam: 'SEBI Grade A (IT Stream)', email: '' });
   const [settingsStatus, setSettingsStatus] = useState({ gemini_api_configured: false, chat_model: 'gemini-2.5-flash' });
-  
+
   // Strategy State
   const [targetExam, setTargetExam] = useState('SEBI Grade A (IT Stream)');
   const [dailyHours, setDailyHours] = useState(4);
@@ -52,16 +68,16 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
 
+  // Workspace Importer Modal State
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [availableWorkspacePdfs, setAvailableWorkspacePdfs] = useState([]);
+  const [importingPath, setImportingPath] = useState(null);
+
   // Settings Modal State
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newApiKey, setNewApiKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [keySaveMsg, setKeySaveMsg] = useState(null);
-
-  // Workspace Importer Modal State
-  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
-  const [availableWorkspacePdfs, setAvailableWorkspacePdfs] = useState([]);
-  const [importingPath, setImportingPath] = useState(null);
 
   // Chat State
   const [chatMessages, setChatMessages] = useState([]);
@@ -70,13 +86,26 @@ export default function App() {
   const [chatMode, setChatMode] = useState('document'); // 'document' or 'general'
   const chatScrollRef = useRef(null);
 
-  // Initial Fetch
+  // Helper for authenticated fetch headers
+  const authHeaders = () => {
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  };
+
+  // Initial Auth Check
   useEffect(() => {
-    fetchUserProfile();
-    fetchSettings();
-    fetchDocuments();
-    fetchPastStrategies();
-  }, []);
+    if (token) {
+      fetchUserProfile();
+      fetchSettings();
+    }
+  }, [token]);
+
+  // Load User Data once authenticated
+  useEffect(() => {
+    if (user && token) {
+      fetchDocuments();
+      fetchPastStrategies();
+    }
+  }, [user, token]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -84,19 +113,121 @@ export default function App() {
     }
   }, [chatMessages, chatLoading]);
 
-  // Fetch API handlers
+  // ==========================================
+  // AUTHENTICATION HANDLERS
+  // ==========================================
+
   const fetchUserProfile = async () => {
     try {
-      const res = await fetch('/api/user');
+      const res = await fetch('/api/auth/me', { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
-        setUser(data);
-        if (data.target_exam) setTargetExam(data.target_exam);
+        setUser(data.user);
+        if (data.user.target_exam) setTargetExam(data.user.target_exam);
+      } else {
+        handleLogout();
       }
     } catch (e) {
       console.error(e);
+      handleLogout();
     }
   };
+
+  const handleLogin = async (e) => {
+    if (e) e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('gov_exam_auth_token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        if (data.user.target_exam) setTargetExam(data.user.target_exam);
+      } else {
+        setAuthError(data.detail || 'Sign in failed. Check email & password.');
+      }
+    } catch (err) {
+      setAuthError('Connection error to auth server.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: signupName,
+          email: signupEmail,
+          password: signupPassword,
+          target_exam: signupTargetExam
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('gov_exam_auth_token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        setTargetExam(data.user.target_exam);
+      } else {
+        setAuthError(data.detail || 'Registration failed.');
+      }
+    } catch (err) {
+      setAuthError('Connection error to auth server.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() });
+    } catch (e) {}
+    localStorage.removeItem('gov_exam_auth_token');
+    setToken('');
+    setUser(null);
+    setDocuments([]);
+    setPastStrategies([]);
+    setStrategyResult(null);
+    setActiveWorkspaceDoc(null);
+  };
+
+  const handleDemoLogin = () => {
+    setLoginEmail('rahul.aspirant@examportal.in');
+    setLoginPassword('DemoPassword123');
+    setTimeout(() => {
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'rahul.aspirant@examportal.in', password: 'DemoPassword123' })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.token) {
+          localStorage.setItem('gov_exam_auth_token', data.token);
+          setToken(data.token);
+          setUser(data.user);
+        }
+      });
+    }, 100);
+  };
+
+  // ==========================================
+  // DATA FETCHING & API HANDLERS
+  // ==========================================
 
   const fetchSettings = async () => {
     try {
@@ -113,7 +244,7 @@ export default function App() {
   const fetchDocuments = async () => {
     setDocsLoading(true);
     try {
-      const res = await fetch('/api/documents');
+      const res = await fetch('/api/documents', { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data.documents || []);
@@ -127,7 +258,7 @@ export default function App() {
 
   const fetchPastStrategies = async () => {
     try {
-      const res = await fetch('/api/strategy/history');
+      const res = await fetch('/api/strategy/history', { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setPastStrategies(data || []);
@@ -142,7 +273,7 @@ export default function App() {
 
   const fetchWorkspacePdfs = async () => {
     try {
-      const res = await fetch('/api/documents/workspace-available');
+      const res = await fetch('/api/documents/workspace-available', { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setAvailableWorkspacePdfs(data.available || []);
@@ -152,13 +283,15 @@ export default function App() {
     }
   };
 
-  // Strategy Generator Handler
   const handleGenerateStrategy = async () => {
     setStrategyLoading(true);
     try {
       const res = await fetch('/api/strategy/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders()
+        },
         body: JSON.stringify({
           exam_name: targetExam,
           daily_hours: parseFloat(dailyHours),
@@ -177,7 +310,6 @@ export default function App() {
     }
   };
 
-  // Upload PDF Handler
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
     if (!uploadFile) return;
@@ -191,6 +323,7 @@ export default function App() {
     try {
       const res = await fetch('/api/documents/upload', {
         method: 'POST',
+        headers: authHeaders(),
         body: formData
       });
       if (res.ok) {
@@ -206,34 +339,6 @@ export default function App() {
     }
   };
 
-  // Save API Key Handler
-  const handleSaveApiKey = async (e) => {
-    e.preventDefault();
-    if (!newApiKey.trim()) return;
-    setSavingKey(true);
-    setKeySaveMsg(null);
-    try {
-      const res = await fetch('/api/settings/api-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: newApiKey.trim() })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setKeySaveMsg({ type: 'success', text: 'API Key updated successfully! Live cloud models are active.' });
-        fetchSettings();
-        setTimeout(() => { setShowSettingsModal(false); setKeySaveMsg(null); setNewApiKey(''); }, 1500);
-      } else {
-        setKeySaveMsg({ type: 'error', text: data.detail || 'Failed to update key.' });
-      }
-    } catch (err) {
-      setKeySaveMsg({ type: 'error', text: 'Error connecting to backend server.' });
-    } finally {
-      setSavingKey(false);
-    }
-  };
-
-  // Workspace Ingest Handler
   const handleImportWorkspace = async (fullPath, suggestedCategory) => {
     setImportingPath(fullPath);
     const formData = new FormData();
@@ -243,6 +348,7 @@ export default function App() {
     try {
       const res = await fetch('/api/documents/import-workspace', {
         method: 'POST',
+        headers: authHeaders(),
         body: formData
       });
       if (res.ok) {
@@ -256,13 +362,15 @@ export default function App() {
     }
   };
 
-  // Delete PDF Handler
   const handleDeleteDocument = async (docId, filename) => {
-    if (!window.confirm(`Are you sure you want to delete '${filename}'? This will remove the file, SQLite record, and ChromaDB embeddings.`)) {
+    if (!window.confirm(`Are you sure you want to delete '${filename}'? This will remove the file from your account, disk, and ChromaDB vector store.`)) {
       return;
     }
     try {
-      const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/documents/${docId}`, {
+        method: 'DELETE',
+        headers: authHeaders()
+      });
       if (res.ok) {
         if (activeWorkspaceDoc?.id === docId) {
           setActiveWorkspaceDoc(null);
@@ -274,7 +382,6 @@ export default function App() {
     }
   };
 
-  // Open Document Workspace
   const handleOpenWorkspace = (doc) => {
     setActiveWorkspaceDoc(doc);
     setChatMode('document');
@@ -287,7 +394,6 @@ export default function App() {
     ]);
   };
 
-  // Send Chat Query
   const handleSendMessage = async (customPrompt = null) => {
     const textToSend = customPrompt || chatInput;
     if (!textToSend.trim() || chatLoading) return;
@@ -300,7 +406,10 @@ export default function App() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders()
+        },
         body: JSON.stringify({
           mode: chatMode,
           document_id: activeWorkspaceDoc?.id || null,
@@ -326,12 +435,41 @@ export default function App() {
         ...prev,
         {
           role: 'assistant',
-          content: 'Error connecting to the AI Tutor. Please check server logs.',
+          content: 'Error connecting to AI Tutor. Please check server logs.',
           sources: []
         }
       ]);
     } finally {
       setChatLoading(false);
+    }
+  };
+
+  const handleSaveApiKey = async (e) => {
+    e.preventDefault();
+    if (!newApiKey.trim()) return;
+    setSavingKey(true);
+    setKeySaveMsg(null);
+    try {
+      const res = await fetch('/api/settings/api-key', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders()
+        },
+        body: JSON.stringify({ api_key: newApiKey.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setKeySaveMsg({ type: 'success', text: 'API Key updated! Live models are active.' });
+        fetchSettings();
+        setTimeout(() => { setShowSettingsModal(false); setKeySaveMsg(null); setNewApiKey(''); }, 1500);
+      } else {
+        setKeySaveMsg({ type: 'error', text: data.detail || 'Failed to update key.' });
+      }
+    } catch (err) {
+      setKeySaveMsg({ type: 'error', text: 'Connection error.' });
+    } finally {
+      setSavingKey(false);
     }
   };
 
@@ -343,6 +481,189 @@ export default function App() {
     return matchCat && matchSearch;
   });
 
+  // ==========================================
+  // 1. AUTHENTICATION SCREEN (LOGIN / SIGNUP)
+  // ==========================================
+  if (!token || !user) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 font-sans">
+        {/* Background decorative styling */}
+        <div className="max-w-md w-full space-y-8 bg-slate-800/90 p-8 rounded-3xl border border-slate-700/80 shadow-2xl backdrop-blur-md">
+          {/* Brand Header */}
+          <div className="text-center">
+            <div className="mx-auto w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 mb-4">
+              <Compass className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-white tracking-tight">GovtPrep AI Portal</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Personalized AI Strategy, PDF Library & ChromaDB RAG Tutor
+            </p>
+          </div>
+
+          {/* Tab Selector */}
+          <div className="grid grid-cols-2 p-1 bg-slate-900/80 rounded-xl border border-slate-700/60 text-xs font-medium">
+            <button
+              onClick={() => { setAuthView('login'); setAuthError(''); }}
+              className={`py-2 rounded-lg transition ${authView === 'login' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setAuthView('signup'); setAuthError(''); }}
+              className={`py-2 rounded-lg transition ${authView === 'signup' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          {/* Error Message */}
+          {authError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {/* SIGN IN FORM */}
+          {authView === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="aspirant@examportal.in"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-2.5 px-4 bg-indigo-600 text-white rounded-xl text-xs font-medium hover:bg-indigo-500 disabled:opacity-50 shadow-md transition"
+              >
+                {authLoading ? 'Signing in...' : 'Sign In to Your Workspace'}
+              </button>
+
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={handleDemoLogin}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-medium underline"
+                >
+                  ⚡ Quick Demo Login (Aspirant Rahul)
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* CREATE ACCOUNT FORM */
+            <form onSubmit={handleSignup} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Full Name</label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    value={signupName}
+                    onChange={(e) => setSignupName(e.target.value)}
+                    placeholder="Your Full Name"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    placeholder="your.email@example.com"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Target Examination</label>
+                <div className="relative">
+                  <GraduationCap className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <select
+                    value={signupTargetExam}
+                    onChange={(e) => setSignupTargetExam(e.target.value)}
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="SEBI Grade A (IT Stream)">SEBI Grade A (IT Stream)</option>
+                    <option value="SBI SCO (Deputy Manager IT)">SBI SCO (Deputy Manager IT)</option>
+                    <option value="IBPS SO (IT Officer)">IBPS SO (IT Officer)</option>
+                    <option value="UPSC CSE 2027">UPSC Civil Services Examination</option>
+                    <option value="SSC CGL">Staff Selection Commission (SSC CGL)</option>
+                    <option value="Railways RRB NTPC">Railways RRB NTPC</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-2.5 px-4 bg-indigo-600 text-white rounded-xl text-xs font-medium hover:bg-indigo-500 disabled:opacity-50 shadow-md transition"
+              >
+                {authLoading ? 'Creating Account...' : 'Create Aspirant Account'}
+              </button>
+            </form>
+          )}
+
+          <div className="pt-2 text-center text-[11px] text-slate-500">
+            🔒 Secure cryptographic PBKDF2 authentication with isolated user storage.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 2. MAIN APPLICATION (AUTHENTICATED)
+  // ==========================================
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* SIDEBAR NAVIGATION */}
@@ -359,12 +680,24 @@ export default function App() {
             </div>
           </div>
 
-          {/* User Target Card */}
-          <div className="p-4 mx-3 my-3 bg-slate-800/80 rounded-xl border border-slate-700/60">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-medium">Aspirant Profile</div>
-            <div className="font-medium text-slate-100 text-sm mt-0.5 truncate">{user.name}</div>
-            <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              {user.target_exam}
+          {/* User Target Card with Logout */}
+          <div className="p-4 mx-3 my-3 bg-slate-800/80 rounded-xl border border-slate-700/60 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Logged-In Aspirant</span>
+                <button
+                  onClick={handleLogout}
+                  className="text-slate-400 hover:text-rose-400 p-1 transition"
+                  title="Sign Out of Account"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="font-semibold text-slate-100 text-sm mt-0.5 truncate">{user.name}</div>
+              <div className="text-[11px] text-slate-400 truncate">{user.email}</div>
+              <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                {user.target_exam}
+              </div>
             </div>
           </div>
 
@@ -425,7 +758,7 @@ export default function App() {
               Configure Key
             </button>
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">ChromaDB • text-embedding-004</div>
+          <div className="mt-1 text-[11px] text-slate-500">ChromaDB • User Isolated</div>
         </div>
       </aside>
 
@@ -445,7 +778,7 @@ export default function App() {
             ) : (
               <div className="flex items-center space-x-2 text-sm font-semibold text-slate-800">
                 {activeTab === 'strategy' && <span>AI Exam Strategy & Preparation Blueprint</span>}
-                {activeTab === 'library' && <span>PDF Resource Manager & Knowledge Base</span>}
+                {activeTab === 'library' && <span>My PDF Resource Library ({documents.length} files)</span>}
                 {activeTab === 'chat' && <span>General Exam Mentor & Current Affairs Q&A</span>}
               </div>
             )}
@@ -479,6 +812,15 @@ export default function App() {
                 </button>
               </>
             )}
+
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 text-xs font-medium hover:bg-rose-50 transition"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
           </div>
         </header>
 
@@ -493,7 +835,7 @@ export default function App() {
               </div>
               <div className="flex-1 w-full h-full relative">
                 <iframe
-                  src={`/api/documents/${activeWorkspaceDoc.id}/raw`}
+                  src={`/api/documents/${activeWorkspaceDoc.id}/raw?token=${encodeURIComponent(token)}`}
                   className="w-full h-full border-none"
                   title="PDF Document Viewer"
                 />
@@ -604,7 +946,6 @@ export default function App() {
             {/* 1. EXAM STRATEGY VIEW */}
             {activeTab === 'strategy' && (
               <div className="max-w-5xl mx-auto space-y-6">
-                {/* Control Card */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
                   <h2 className="text-base font-semibold text-slate-900 mb-4 flex items-center space-x-2">
                     <Sparkles className="w-4 h-4 text-indigo-600" />
@@ -661,7 +1002,7 @@ export default function App() {
                       {strategyLoading ? (
                         <>
                           <span className="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
-                          <span>Generating AI Blueprint...</span>
+                          <span>Generating Blueprint...</span>
                         </>
                       ) : (
                         <>
@@ -687,7 +1028,6 @@ export default function App() {
             {/* 2. RESOURCE LIBRARY VIEW */}
             {activeTab === 'library' && (
               <div className="max-w-6xl mx-auto space-y-6">
-                {/* Search & Filter Bar */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center space-x-2 overflow-x-auto">
                     {categories.map((cat) => (
@@ -700,7 +1040,7 @@ export default function App() {
                             : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                         }`}
                       >
-                        {cat === 'all' ? 'All Resources' : cat}
+                        {cat === 'all' ? 'All My Resources' : cat}
                       </button>
                     ))}
                   </div>
@@ -711,13 +1051,12 @@ export default function App() {
                       type="text"
                       value={searchDocQuery}
                       onChange={(e) => setSearchDocQuery(e.target.value)}
-                      placeholder="Search PDF documents..."
+                      placeholder="Search my PDF documents..."
                       className="w-full pl-9 pr-3.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                {/* Document Grid */}
                 {docsLoading ? (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                     {[1, 2, 3].map((n) => (
@@ -727,8 +1066,8 @@ export default function App() {
                 ) : filteredDocs.length === 0 ? (
                   <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 p-8">
                     <BookOpen className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                    <h3 className="text-sm font-medium text-slate-800">No documents found</h3>
-                    <p className="text-xs text-slate-500 mt-1">Upload a PDF or scan your local workspace to populate the library.</p>
+                    <h3 className="text-sm font-medium text-slate-800">No documents in your account</h3>
+                    <p className="text-xs text-slate-500 mt-1">Upload a PDF or scan workspace files to add resources to your personal library.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -929,7 +1268,7 @@ export default function App() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Workspace Study PDFs ({availableWorkspacePdfs.length})</h3>
-                <p className="text-xs text-slate-500">One-click import into ChromaDB & the platform library</p>
+                <p className="text-xs text-slate-500">One-click import into ChromaDB & your account library</p>
               </div>
               <button onClick={() => setShowWorkspaceModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-4 h-4" />
@@ -963,6 +1302,7 @@ export default function App() {
           </div>
         </div>
       )}
+
       {/* SETTINGS / API KEY MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
