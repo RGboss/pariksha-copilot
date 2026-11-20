@@ -1,0 +1,33 @@
+# Base Python image for Pariksha Copilot Backend
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system dependencies for psycopg2, PyMuPDF, and healthcheck curl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python requirements
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source code
+COPY backend/ /app/backend/
+
+# Ensure runtime directories exist
+RUN mkdir -p /app/data /app/uploads
+
+EXPOSE 8000
+
+# Health check using the /api/health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Start the FastAPI server via Uvicorn
+CMD ["uvicorn", "backend.server:app", "--host", "0.0.0.0", "--port", "8000"]

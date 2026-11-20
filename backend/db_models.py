@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import (
-    create_engine, Column, String, Integer, Float, Text, DateTime, ForeignKey, desc, text
+    create_engine, Column, String, Integer, Float, Text, DateTime, ForeignKey, desc, text, inspect
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, scoped_session
 
@@ -19,9 +19,33 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "gov_exam_portal.db")
 
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+# PostgreSQL & SQLite Multi-Database Support
+raw_db_url = os.environ.get("DATABASE_URL", "").strip()
+if raw_db_url:
+    # Standardize postgres:// or postgresql:// to postgresql+psycopg2://
+    if raw_db_url.startswith("postgres://"):
+        raw_db_url = raw_db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif raw_db_url.startswith("postgresql://") and not raw_db_url.startswith("postgresql+"):
+        raw_db_url = raw_db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    DATABASE_URL = raw_db_url
+else:
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Connection Engine
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=300
+    )
+
 SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False))
 Base = declarative_base()
 
@@ -168,41 +192,52 @@ class ChatHistory(Base):
 
 # Automatic Migration & Table Initialization
 def _run_migrations():
-    with engine.connect() as conn:
-        # Check users columns
-        info = conn.execute(text("PRAGMA table_info(users)")).fetchall()
-        existing_cols = [r[1] for r in info]
-        if "password_hash" not in existing_cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(256)"))
-        if "salt" not in existing_cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN salt VARCHAR(64)"))
-        if "preferred_model" not in existing_cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
+    try:
+        with engine.connect() as conn:
+            inspector = inspect(conn)
 
-        # Check documents columns
-        doc_info = conn.execute(text("PRAGMA table_info(documents)")).fetchall()
-        doc_cols = [r[1] for r in doc_info]
-        if "file_hash" not in doc_cols:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN file_hash VARCHAR(64)"))
-        if "toc_json" not in doc_cols:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN toc_json TEXT DEFAULT '[]'"))
-        if "chunk_count" not in doc_cols:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_count INTEGER DEFAULT 0"))
-        if "extracted_chars" not in doc_cols:
-            conn.execute(text("ALTER TABLE documents ADD COLUMN extracted_chars INTEGER DEFAULT 0"))
+            # Check users columns
+            if inspector.has_table("users"):
+                user_cols = [c["name"] for c in inspector.get_columns("users")]
+                if "password_hash" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(256)"))
+                if "salt" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN salt VARCHAR(64)"))
+                if "preferred_model" not in user_cols:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN preferred_model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
 
-        # Check chat_history columns
-        chat_info = conn.execute(text("PRAGMA table_info(chat_history)")).fetchall()
-        chat_cols = [r[1] for r in chat_info]
-        if "model" not in chat_cols:
-            conn.execute(text("ALTER TABLE chat_history ADD COLUMN model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
-        if "token_count" not in chat_cols:
-            conn.execute(text("ALTER TABLE chat_history ADD COLUMN token_count INTEGER DEFAULT 0"))
+            # Check documents columns
+            if inspector.has_table("documents"):
+                doc_cols = [c["name"] for c in inspector.get_columns("documents")]
+                if "file_hash" not in doc_cols:
+                    conn.execute(text("ALTER TABLE documents ADD COLUMN file_hash VARCHAR(64)"))
+                if "toc_json" not in doc_cols:
+                    conn.execute(text("ALTER TABLE documents ADD COLUMN toc_json TEXT DEFAULT '[]'"))
+                if "chunk_count" not in doc_cols:
+                    conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_count INTEGER DEFAULT 0"))
+                if "extracted_chars" not in doc_cols:
+                    conn.execute(text("ALTER TABLE documents ADD COLUMN extracted_chars INTEGER DEFAULT 0"))
 
-        conn.commit()
+            # Check chat_history columns
+            if inspector.has_table("chat_history"):
+                chat_cols = [c["name"] for c in inspector.get_columns("chat_history")]
+                if "model" not in chat_cols:
+                    conn.execute(text("ALTER TABLE chat_history ADD COLUMN model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
+                if "token_count" not in chat_cols:
+                    conn.execute(text("ALTER TABLE chat_history ADD COLUMN token_count INTEGER DEFAULT 0"))
 
-Base.metadata.create_all(bind=engine)
-_run_migrations()
+            conn.commit()
+    except Exception as e:
+        print(f"[DB] Database migration notice: {e}")
+
+def init_db():
+    """Initializes tables, executes schema migrations, and seeds demo account."""
+    try:
+        Base.metadata.create_all(bind=engine)
+        _run_migrations()
+        seed_demo_user()
+    except Exception as e:
+        print(f"[DB] Database initialization notice: {e}")
 
 # ==============================================================
 # CRYPTOGRAPHIC AUTHENTICATION UTILITIES
@@ -292,4 +327,4 @@ def seed_demo_user():
     finally:
         session.close()
 
-seed_demo_user()
+init_db()

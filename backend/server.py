@@ -26,15 +26,20 @@ from backend.db_models import (
     SessionLocal, User, Document as DocModel, StudyPlan as PlanModel,
     ChatHistory as ChatModel, UserSession,
     hash_password, verify_password, create_user_session,
-    get_user_from_token, delete_user_session, seed_demo_user
+    get_user_from_token, delete_user_session, seed_demo_user, init_db
 )
 from backend.chroma_rag import rag_service, compute_file_hash
 
 app = FastAPI(
     title="Government Exam Preparation Platform & AI Tutor",
-    version="2.2.0",
-    description="Full-stack AI platform with Multi-User Authentication, Multi-Model Selection, PyMuPDF Analysis, and Token-Optimized ChromaDB RAG."
+    version="2.3.0",
+    description="Full-stack AI platform with PostgreSQL, Multi-Model Selection, PyMuPDF Analysis, and Token-Optimized ChromaDB RAG."
 )
+
+@app.on_event("startup")
+def on_startup():
+    """Ensure database schema is verified and seeded on application startup."""
+    init_db()
 
 app.add_middleware(
     CORSMiddleware,

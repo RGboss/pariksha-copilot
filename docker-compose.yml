@@ -1,0 +1,78 @@
+services:
+  # ==============================================================
+  # Database Service: PostgreSQL 16
+  # ==============================================================
+  db:
+    image: postgres:16-alpine
+    container_name: pariksha_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pariksha_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pariksha_secret_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-pariksha_copilot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pariksha_user} -d ${POSTGRES_DB:-pariksha_copilot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - pariksha_net
+
+  # ==============================================================
+  # Backend Service: FastAPI + ChromaDB + Google GenAI + PyMuPDF
+  # ==============================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: pariksha_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-pariksha_user}:${POSTGRES_PASSWORD:-pariksha_secret_pass}@db:5432/${POSTGRES_DB:-pariksha_copilot}
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - pariksha_net
+
+  # ==============================================================
+  # Frontend & Reverse Proxy: Nginx + React SPA
+  # ==============================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: pariksha_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PORT:-80}:80"
+    networks:
+      - pariksha_net
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+networks:
+  pariksha_net:
+    driver: bridge
