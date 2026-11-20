@@ -21,8 +21,8 @@ from google.genai.errors import APIError
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE_DIR, "data"))
+CHROMA_DIR = os.environ.get("CHROMA_PERSIST_DIR", os.path.join(DATA_DIR, "chroma_db"))
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
 def compute_file_hash(file_path: str) -> str:

@@ -59,12 +59,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+def root_health():
+    """Root health check endpoint for Docker container healthchecks."""
+    return {"status": "healthy"}
+
 @app.get("/api/health")
 def health_check():
     """Health check endpoint for platform monitoring."""
     return {"status": "ok", "app": "pariksha-copilot", "version": "2.3.0"}
 
-UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+UPLOADS_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # Mount uploads directory for static file access

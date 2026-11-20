@@ -77,17 +77,17 @@ Pariksha Copilot combines an **Adaptive AI Strategy Generator**, a **Digital Boo
 
 ## 🐳 Running with Docker & Docker Compose (Recommended)
 
-Run the full production stack (PostgreSQL + FastAPI Backend + Nginx Reverse Proxy & React UI) with a single command:
+Run the production stack (FastAPI Backend with Gunicorn + Nginx Reverse Proxy & React UI, with optional PostgreSQL) with a single command:
 
 ### 1. Configure Environment
 Create a `.env` file in the project root:
 ```bash
 cp .env.example .env
 ```
-Add your Google Gemini API key:
+Add your Google Gemini API key and adjust settings if desired:
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-PORT=80
+PORT=8082
 ```
 
 ### 2. Start the Stack
@@ -98,16 +98,33 @@ docker compose up --build -d
 ### 3. Access the Application
 Open your browser at:
 ```
-http://localhost
+http://localhost:8082
 ```
 
-To view logs:
+### 4. Health & Status Checks
+- **Frontend & App Gateway:** `http://localhost:8082/`
+- **Container Healthcheck Endpoint:** `http://localhost:8082/health`
+- **Application Info & Version:** `http://localhost:8082/api/health`
+
+### 5. Persistent Named Volumes
+Pariksha Copilot ensures state persistence across container restarts and updates via Docker named volumes:
+- `pariksha_sqlite_data` (`/app/data`): Stores the primary SQLite database (`gov_exam_portal.db`), user accounts, flashcards, quizzes, and planner milestones.
+- `pariksha_chroma_data` (`/app/data/chroma_db`): Stores persistent ChromaDB vector collections and document embeddings.
+- `pariksha_uploads_data` (`/app/data/uploads`): Stores uploaded syllabus PDFs and textbooks partitioned by user ID and category.
+- `pariksha_postgres_data` (`/var/lib/postgresql/data`): Stores PostgreSQL database files when running in PostgreSQL mode.
+
+### 6. View Logs & Container Lifecycle
 ```bash
+# Stream all container logs
 docker compose logs -f
-```
 
-To stop containers:
-```bash
+# View status and health
+docker compose ps
+
+# Restart services (persisting all databases and uploads)
+docker compose restart
+
+# Stop containers
 docker compose down
 ```
 
