@@ -25,10 +25,20 @@ load_dotenv(dotenv_path=ENV_PATH, override=True)
 from backend.db_models import (
     SessionLocal, User, Document as DocModel, StudyPlan as PlanModel,
     ChatHistory as ChatModel, UserSession,
+    Flashcard, Quiz, QuizAttempt, StudyTask,
     hash_password, verify_password, create_user_session,
     get_user_from_token, delete_user_session, seed_demo_user, init_db
 )
 from backend.chroma_rag import rag_service, compute_file_hash
+from backend.flashcards_service import (
+    generate_flashcards_from_doc, review_flashcard, get_user_flashcards
+)
+from backend.quiz_service import (
+    generate_quiz_from_doc, submit_quiz_attempt, get_user_quizzes
+)
+from backend.planner_service import (
+    create_task, get_tasks, toggle_task, delete_task, get_planner_stats
+)
 
 app = FastAPI(
     title="Government Exam Preparation Platform & AI Tutor",
@@ -113,6 +123,32 @@ class UserUpdateRequest(BaseModel):
 
 class ApiKeyUpdate(BaseModel):
     api_key: str
+
+class GenerateFlashcardsRequest(BaseModel):
+    document_id: Optional[str] = None
+    topic: Optional[str] = None
+    count: Optional[int] = 5
+    category: Optional[str] = "High-Yield Facts"
+
+class ReviewFlashcardRequest(BaseModel):
+    rating: str  # 'again', 'hard', 'good', 'easy'
+
+class GenerateQuizRequest(BaseModel):
+    document_id: Optional[str] = None
+    topic: Optional[str] = None
+    exam_name: Optional[str] = "Competitive Exam"
+    question_count: Optional[int] = 5
+
+class SubmitQuizRequest(BaseModel):
+    answers: Dict[str, int]
+    time_spent_seconds: Optional[int] = 0
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    category: Optional[str] = "Revision"
+    priority: Optional[str] = "High"
+    due_date: Optional[str] = None
 
 # ==============================================================
 # AUTHENTICATION DEPENDENCY & HELPERS
@@ -667,6 +703,159 @@ def update_api_key(req: ApiKeyUpdate, current_user: User = Depends(get_current_u
     os.environ["GEMINI_API_KEY"] = key
     rag_service._load_client()
     return {"status": "updated", "gemini_configured": rag_service.is_configured()}
+
+# ==============================================================
+# FLASHCARDS & ACTIVE RECALL (SPACED REPETITION)
+# ==============================================================
+
+@app.post("/api/flashcards/generate")
+def create_flashcards(req: GenerateFlashcardsRequest, current_user: User = Depends(get_current_user)):
+    """Generates structured revision flashcards from a document or syllabus topic."""
+    cards = generate_flashcards_from_doc(
+        user_id=current_user.id,
+        document_id=req.document_id,
+        topic=req.topic,
+        count=req.count or 5,
+        category=req.category or "High-Yield Facts"
+    )
+    return {"status": "success", "flashcards": cards, "count": len(cards)}
+
+@app.get("/api/flashcards")
+def list_flashcards(
+    document_id: Optional[str] = None,
+    due_only: bool = False,
+    current_user: User = Depends(get_current_user)
+):
+    """Lists flashcards belonging to the current authenticated aspirant."""
+    cards = get_user_flashcards(
+        user_id=current_user.id,
+        document_id=document_id,
+        due_only=due_only
+    )
+    return {"flashcards": cards, "total": len(cards)}
+
+@app.post("/api/flashcards/{card_id}/review")
+def review_single_flashcard(
+    card_id: str,
+    req: ReviewFlashcardRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Processes Leitner box progression for a flashcard based on recall rating."""
+    updated = review_flashcard(
+        user_id=current_user.id,
+        card_id=card_id,
+        rating=req.rating
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Flashcard not found.")
+    return {"status": "success", "flashcard": updated}
+
+@app.get("/api/flashcards/export")
+def export_flashcards_markdown(
+    document_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Exports flashcard decks in structured Markdown format for offline study."""
+    cards = get_user_flashcards(user_id=current_user.id, document_id=document_id)
+    lines = ["# 🗂️ High-Yield Study Flashcards Deck", f"**Aspirant:** {current_user.name}", f"**Exam:** {current_user.target_exam}", f"**Exported:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ""]
+    for i, c in enumerate(cards, 1):
+        lines.append(f"### Card {i}: {c['category']} ({c['difficulty']})")
+        lines.append(f"**Q:** {c['front_prompt']}")
+        lines.append(f"**A:** {c['back_answer']}")
+        lines.append(f"*Mastery Box: {c['mastery_level']}/5 | Total Reviews: {c['review_count']}*\n---")
+    return {"markdown": "\n".join(lines)}
+
+# ==============================================================
+# MOCK QUIZ & PYQ ASSESSMENT ENGINE (CBT SIMULATOR)
+# ==============================================================
+
+@app.post("/api/quiz/generate")
+def create_quiz(req: GenerateQuizRequest, current_user: User = Depends(get_current_user)):
+    """Generates a timed Computer-Based Test (CBT) mock exam from syllabus/docs."""
+    quiz = generate_quiz_from_doc(
+        user_id=current_user.id,
+        document_id=req.document_id,
+        topic=req.topic,
+        exam_name=req.exam_name or current_user.target_exam,
+        question_count=req.question_count or 5
+    )
+    if not quiz:
+        raise HTTPException(status_code=500, detail="Failed to generate quiz.")
+    return {"status": "success", "quiz": quiz}
+
+@app.get("/api/quiz")
+def list_quizzes(current_user: User = Depends(get_current_user)):
+    """Lists all quizzes and user score reports."""
+    quizzes = get_user_quizzes(user_id=current_user.id)
+    return {"quizzes": quizzes, "total": len(quizzes)}
+
+@app.post("/api/quiz/{quiz_id}/submit")
+def submit_quiz(
+    quiz_id: str,
+    req: SubmitQuizRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Submits answer sheet, grades with explanations, and records attempt."""
+    result = submit_quiz_attempt(
+        user_id=current_user.id,
+        quiz_id=quiz_id,
+        answers=req.answers,
+        time_spent_seconds=req.time_spent_seconds or 0
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Quiz not found.")
+    return {"status": "success", "attempt": result}
+
+# ==============================================================
+# STUDY PLANNER, REVISION CHECKLIST & STATS
+# ==============================================================
+
+@app.get("/api/planner/tasks")
+def list_tasks(current_user: User = Depends(get_current_user)):
+    """Retrieves all daily study tasks and revision items."""
+    tasks = get_tasks(user_id=current_user.id)
+    return {"tasks": tasks, "total": len(tasks)}
+
+@app.post("/api/planner/tasks")
+def add_task(req: CreateTaskRequest, current_user: User = Depends(get_current_user)):
+    """Adds a new study or revision task."""
+    due = None
+    if req.due_date:
+        try:
+            due = datetime.fromisoformat(req.due_date.replace("Z", "+00:00"))
+        except Exception:
+            due = None
+    task = create_task(
+        user_id=current_user.id,
+        title=req.title,
+        description=req.description or "",
+        category=req.category or "Revision",
+        priority=req.priority or "High",
+        due_date=due
+    )
+    return {"status": "success", "task": task}
+
+@app.post("/api/planner/tasks/{task_id}/toggle")
+def toggle_single_task(task_id: str, current_user: User = Depends(get_current_user)):
+    """Toggles completion state of a task."""
+    task = toggle_task(user_id=current_user.id, task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return {"status": "success", "task": task}
+
+@app.delete("/api/planner/tasks/{task_id}")
+def remove_task(task_id: str, current_user: User = Depends(get_current_user)):
+    """Deletes a study task."""
+    ok = delete_task(user_id=current_user.id, task_id=task_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return {"status": "success", "deleted_id": task_id}
+
+@app.get("/api/planner/stats")
+def planner_statistics(current_user: User = Depends(get_current_user)):
+    """Returns study metrics, completion rate, and current streak."""
+    stats = get_planner_stats(user_id=current_user.id)
+    return stats
 
 # ==============================================================
 # CURRICULUM & QUESTIONS PRESERVATION (PUBLIC)

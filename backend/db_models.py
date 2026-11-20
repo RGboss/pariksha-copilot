@@ -65,6 +65,10 @@ class User(Base):
     study_plans = relationship("StudyPlan", back_populates="user", cascade="all, delete-orphan")
     chat_messages = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
+    quizzes = relationship("Quiz", back_populates="user", cascade="all, delete-orphan")
+    quiz_attempts = relationship("QuizAttempt", back_populates="user", cascade="all, delete-orphan")
+    study_tasks = relationship("StudyTask", back_populates="user", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -188,6 +192,135 @@ class ChatHistory(Base):
             "model": self.model or "gemini-2.5-flash",
             "token_count": self.token_count or 0,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None
+        }
+
+class Flashcard(Base):
+    __tablename__ = "flashcards"
+    
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=False)
+    document_id = Column(String(64), nullable=True)
+    category = Column(String(100), default="General Revision")
+    front_prompt = Column(Text, nullable=False)
+    back_answer = Column(Text, nullable=False)
+    difficulty = Column(String(20), default="Medium")  # Easy, Medium, Hard
+    mastery_level = Column(Integer, default=0)         # Leitner Box 0-5
+    review_count = Column(Integer, default=0)
+    next_review_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="flashcards")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "document_id": self.document_id,
+            "category": self.category,
+            "front_prompt": self.front_prompt,
+            "back_answer": self.back_answer,
+            "difficulty": self.difficulty,
+            "mastery_level": self.mastery_level,
+            "review_count": self.review_count,
+            "next_review_at": self.next_review_at.isoformat() if self.next_review_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+class Quiz(Base):
+    __tablename__ = "quizzes"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=False)
+    document_id = Column(String(64), nullable=True)
+    title = Column(String(255), nullable=False)
+    exam_name = Column(String(120), default="Competitive Exam")
+    questions_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="quizzes")
+    attempts = relationship("QuizAttempt", back_populates="quiz", cascade="all, delete-orphan")
+
+    def to_dict(self):
+        import json
+        questions = []
+        try:
+            questions = json.loads(self.questions_json or "[]")
+        except Exception:
+            pass
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "document_id": self.document_id,
+            "title": self.title,
+            "exam_name": self.exam_name,
+            "question_count": len(questions),
+            "questions": questions,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=False)
+    quiz_id = Column(String(64), ForeignKey("quizzes.id"), nullable=False)
+    score = Column(Integer, nullable=False, default=0)
+    total_questions = Column(Integer, nullable=False, default=0)
+    percentage = Column(Float, nullable=False, default=0.0)
+    time_spent_seconds = Column(Integer, default=0)
+    answers_json = Column(Text, default="{}")
+    completed_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="quiz_attempts")
+    quiz = relationship("Quiz", back_populates="attempts")
+
+    def to_dict(self):
+        import json
+        answers = {}
+        try:
+            answers = json.loads(self.answers_json or "{}")
+        except Exception:
+            pass
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "quiz_id": self.quiz_id,
+            "score": self.score,
+            "total_questions": self.total_questions,
+            "percentage": round(self.percentage, 1),
+            "time_spent_seconds": self.time_spent_seconds,
+            "answers": answers,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None
+        }
+
+class StudyTask(Base):
+    __tablename__ = "study_tasks"
+
+    id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, default="")
+    category = Column(String(100), default="Revision")
+    priority = Column(String(20), default="High")  # High, Medium, Low
+    due_date = Column(DateTime, nullable=True)
+    is_completed = Column(Integer, default=0)      # 0 or 1
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="study_tasks")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "description": self.description,
+            "category": self.category,
+            "priority": self.priority,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "is_completed": bool(self.is_completed),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
 # Automatic Migration & Table Initialization

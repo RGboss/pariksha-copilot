@@ -47,6 +47,21 @@ Pariksha Copilot combines an **Adaptive AI Strategy Generator**, a **Digital Boo
    - Bearer session token authentication cleanly isolating documents, strategies, and chats per user.
    - Multi-turn conversation history automatically saved and resumed upon re-opening documents.
 
+8. **Active Recall Flashcards (Leitner Spaced Repetition):**
+   - AI-generated flashcards extracted directly from uploaded textbooks or custom syllabus topics.
+   - 5-stage Leitner spaced repetition review algorithm (`Again`, `Hard`, `Good`, `Easy`) to maximize long-term retention of constitutional articles, statutory metrics, and high-yield formulas.
+   - 1-click Markdown revision deck export for offline review.
+
+9. **Timed CBT Mock Exam Simulator & PYQs:**
+   - Computer-Based Test (CBT) interface simulating real exam pressure with countdown timers and question palettes.
+   - 4-option multiple choice questions with detailed explanations, official rationales, and exact page/document citations.
+   - Instant scorecards, percentage calculations, and historical attempt analytics.
+
+10. **Daily Study Planner & Focus Desk:**
+    - Daily syllabus milestone checklist with priority ratings (`High`, `Medium`, `Low`) and categories.
+    - Integrated Pomodoro focus timer (25 min deep work / 5 min break intervals).
+    - Preparation streak counter and completion rate benchmarks.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -152,6 +167,9 @@ python test_account_chat_resumption.py
 
 # Test multi-model selection, PyMuPDF extraction, and token optimization
 python test_powerful_pdf_and_models.py
+
+# Test active recall flashcards, CBT mock quiz, and daily planner
+python test_extended_features.py
 ```
 
 ---

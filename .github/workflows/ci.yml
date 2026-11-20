@@ -1,0 +1,89 @@
+name: Pariksha Copilot CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-tests:
+    name: Backend Test Suite (Python 3.11)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_pariksha_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev build-essential
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt requests
+
+      - name: Verify PostgreSQL & SQLite Database Migrations
+        env:
+          DATABASE_URL: postgresql+psycopg2://test_user:test_password@localhost:5432/test_pariksha_db
+        run: |
+          python -c "from backend.db_models import init_db; init_db(); print('PostgreSQL schema initialized successfully!')"
+
+      - name: Run Backend Server for Testing
+        env:
+          DATABASE_URL: postgresql+psycopg2://test_user:test_password@localhost:5432/test_pariksha_db
+          GEMINI_API_KEY: ci_test_key_placeholder
+        run: |
+          python run_server.py &
+          sleep 4
+          curl -f http://127.0.0.1:8000/api/health || exit 1
+
+      - name: Run Extended Features Test Suite
+        run: |
+          python test_extended_features.py
+
+  frontend-build:
+    name: Frontend Production Build (Node 20)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Node Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build React SPA
+        working-directory: frontend
+        run: npm run build

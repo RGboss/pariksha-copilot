@@ -33,8 +33,13 @@ import {
   Cpu,
   Zap,
   List,
-  Layers
+  Layers,
+  CheckSquare
 } from 'lucide-react';
+
+import FlashcardsDeck from './components/FlashcardsDeck';
+import MockExamSimulator from './components/MockExamSimulator';
+import DailyPlanner from './components/DailyPlanner';
 
 export default function App() {
   // Authentication State
@@ -836,6 +841,42 @@ export default function App() {
             </button>
 
             <button
+              onClick={() => { setActiveTab('flashcards'); setActiveWorkspaceDoc(null); }}
+              className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'flashcards' && !activeWorkspaceDoc
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Active Recall Flashcards</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveTab('quiz'); setActiveWorkspaceDoc(null); }}
+              className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'quiz' && !activeWorkspaceDoc
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <FileQuestion className="w-4 h-4" />
+              <span>Mock Exam & CBT Simulator</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveTab('planner'); setActiveWorkspaceDoc(null); }}
+              className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'planner' && !activeWorkspaceDoc
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <CheckSquare className="w-4 h-4" />
+              <span>Daily Study Planner</span>
+            </button>
+
+            <button
               onClick={() => { setActiveTab('chat'); setActiveWorkspaceDoc(null); setChatMode('general'); fetchChatHistory(null); }}
               className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'chat' && !activeWorkspaceDoc
@@ -884,6 +925,9 @@ export default function App() {
               <div className="flex items-center space-x-2 text-sm font-bold text-slate-800">
                 {activeTab === 'strategy' && <span>🎯 Strategic All India Rank (AIR) Preparation Blueprint</span>}
                 {activeTab === 'library' && <span>📚 My Digital Study Vault ({documents.length} Books & Solved Papers)</span>}
+                {activeTab === 'flashcards' && <span>🗂️ Active Recall Flashcards & Leitner Spaced Repetition</span>}
+                {activeTab === 'quiz' && <span>📝 Timed CBT Mock Examination & Previous Year Questions</span>}
+                {activeTab === 'planner' && <span>🎯 Daily Revision Planner, Habit Streak & Focus Desk</span>}
                 {activeTab === 'chat' && <span>🎓 Personal Examination Faculty Mentor & Doubt Solver</span>}
               </div>
             )}
@@ -1388,7 +1432,22 @@ export default function App() {
               </div>
             )}
 
-            {/* 3. 24/7 FACULTY MENTOR */}
+            {/* 3. ACTIVE RECALL FLASHCARDS (LEITNER SPACED REPETITION) */}
+            {activeTab === 'flashcards' && (
+              <FlashcardsDeck documents={documents} token={token} />
+            )}
+
+            {/* 4. CBT MOCK EXAM SIMULATOR & PYQ ASSESSMENT */}
+            {activeTab === 'quiz' && (
+              <MockExamSimulator documents={documents} token={token} targetExam={targetExam} />
+            )}
+
+            {/* 5. DAILY STUDY PLANNER & DISCIPLINE TRACKER */}
+            {activeTab === 'planner' && (
+              <DailyPlanner token={token} targetExam={targetExam} />
+            )}
+
+            {/* 6. 24/7 FACULTY MENTOR */}
             {activeTab === 'chat' && (
               <div className="max-w-4xl mx-auto h-[calc(100vh-140px)] flex flex-col bg-white rounded-2xl border border-amber-900/10 shadow-xs overflow-hidden">
                 <div className="p-4 border-b border-amber-900/10 bg-amber-50/30 flex items-center justify-between">
