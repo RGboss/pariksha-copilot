@@ -28,12 +28,12 @@ from backend.db_models import (
     hash_password, verify_password, create_user_session,
     get_user_from_token, delete_user_session, seed_demo_user
 )
-from backend.chroma_rag import rag_service
+from backend.chroma_rag import rag_service, compute_file_hash
 
 app = FastAPI(
     title="Government Exam Preparation Platform & AI Tutor",
-    version="2.1.0",
-    description="Full-stack AI platform with Multi-User Authentication, PDF Resource Manager, and ChromaDB RAG."
+    version="2.2.0",
+    description="Full-stack AI platform with Multi-User Authentication, Multi-Model Selection, PyMuPDF Analysis, and Token-Optimized ChromaDB RAG."
 )
 
 app.add_middleware(
@@ -87,16 +87,19 @@ class StrategyRequest(BaseModel):
     exam_name: str
     daily_hours: float = 4.0
     prep_level: str = "Intermediate"
+    model: Optional[str] = None
 
 class ChatRequest(BaseModel):
     mode: str = "document"  # "document" or "general"
     document_id: Optional[str] = None
     category: Optional[str] = None
     query: str
+    model: Optional[str] = None
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
     target_exam: Optional[str] = None
+    preferred_model: Optional[str] = None
 
 class ApiKeyUpdate(BaseModel):
     api_key: str
@@ -216,6 +219,8 @@ def update_user_profile(req: UserUpdateRequest, current_user: User = Depends(get
             user.name = req.name.strip()
         if req.target_exam:
             user.target_exam = req.target_exam.strip()
+        if req.preferred_model:
+            user.preferred_model = req.preferred_model.strip()
         session.commit()
         session.refresh(user)
         return user.to_dict()
@@ -230,10 +235,12 @@ def update_user_profile(req: UserUpdateRequest, current_user: User = Depends(get
 def generate_strategy(req: StrategyRequest, current_user: User = Depends(get_current_user)):
     session = SessionLocal()
     try:
+        selected_model = req.model or getattr(current_user, "preferred_model", None) or "gemini-2.5-flash"
         strategy_md = rag_service.generate_exam_strategy(
             exam_name=req.exam_name,
             daily_hours=req.daily_hours,
-            prep_level=req.prep_level
+            prep_level=req.prep_level,
+            model=selected_model
         )
 
         plan = PlanModel(
@@ -307,13 +314,10 @@ async def upload_document(
             shutil.copyfileobj(file.file, buffer)
 
         file_size = os.path.getsize(file_dest)
+        file_hash = compute_file_hash(file_dest)
 
-        import pypdf
-        reader = pypdf.PdfReader(file_dest)
-        page_count = len(reader.pages)
-
-        # Index in ChromaDB with user isolation
-        chunk_count = rag_service.index_document(
+        # Index in ChromaDB with user isolation and deep PyMuPDF analysis
+        index_res = rag_service.index_document(
             doc_id=doc_id,
             file_path=file_dest,
             category=category,
@@ -321,11 +325,18 @@ async def upload_document(
             user_id=current_user.id
         )
 
+        page_count = index_res.get("page_count", 1) or 1
+        chunk_count = index_res.get("chunk_count", 0)
+        toc_json = json.dumps(index_res.get("toc", []))
+        extracted_chars = index_res.get("total_chars", 0)
+
         # Auto-generate Quick Summary
+        selected_model = getattr(current_user, "preferred_model", None) or "gemini-2.5-flash"
         summary = rag_service.generate_quick_summary(
             file_path=file_dest,
             filename=file.filename,
-            category=category
+            category=category,
+            model=selected_model
         )
 
         doc = DocModel(
@@ -338,14 +349,16 @@ async def upload_document(
             summary=summary,
             vector_collection_id="gov_exam_rag_docs",
             page_count=page_count,
-            file_size=file_size
+            file_size=file_size,
+            file_hash=file_hash,
+            toc_json=toc_json,
+            chunk_count=chunk_count,
+            extracted_chars=extracted_chars
         )
         session.add(doc)
         session.commit()
         session.refresh(doc)
-        res = doc.to_dict()
-        res["chunk_count"] = chunk_count
-        return res
+        return doc.to_dict()
     finally:
         session.close()
 
@@ -467,13 +480,10 @@ def import_workspace_document(
 
         shutil.copy2(full_path, dest_path)
         file_size = os.path.getsize(dest_path)
+        file_hash = compute_file_hash(dest_path)
 
-        import pypdf
-        reader = pypdf.PdfReader(dest_path)
-        page_count = len(reader.pages)
-
-        # Index in ChromaDB with user isolation
-        rag_service.index_document(
+        # Index in ChromaDB with user isolation and deep PyMuPDF analysis
+        index_res = rag_service.index_document(
             doc_id=doc_id,
             file_path=dest_path,
             category=category,
@@ -481,10 +491,17 @@ def import_workspace_document(
             user_id=current_user.id
         )
 
+        page_count = index_res.get("page_count", 1) or 1
+        chunk_count = index_res.get("chunk_count", 0)
+        toc_json = json.dumps(index_res.get("toc", []))
+        extracted_chars = index_res.get("total_chars", 0)
+
+        selected_model = getattr(current_user, "preferred_model", None) or "gemini-2.5-flash"
         summary = rag_service.generate_quick_summary(
             file_path=dest_path,
             filename=filename,
-            category=category
+            category=category,
+            model=selected_model
         )
 
         doc = DocModel(
@@ -497,7 +514,11 @@ def import_workspace_document(
             summary=summary,
             vector_collection_id="gov_exam_rag_docs",
             page_count=page_count,
-            file_size=file_size
+            file_size=file_size,
+            file_hash=file_hash,
+            toc_json=toc_json,
+            chunk_count=chunk_count,
+            extracted_chars=extracted_chars
         )
         session.add(doc)
         session.commit()
@@ -525,25 +546,34 @@ def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user
         session.add(user_msg)
         session.commit()
 
-        # Execute Query with User Scoping
+        # Determine Model Preference
+        selected_model = req.model or getattr(current_user, "preferred_model", None) or "gemini-2.5-flash"
+
+        # Execute Query with User Scoping & Model Selection
         if req.mode == "general":
-            res = rag_service.answer_general_mentor_query(req.query)
+            res = rag_service.answer_general_mentor_query(req.query, model=selected_model)
         else:
             res = rag_service.answer_rag_query(
                 query=req.query,
                 doc_id=req.document_id,
                 category=req.category,
-                user_id=current_user.id
+                user_id=current_user.id,
+                model=selected_model
             )
 
-        # Save assistant message with citation metadata
+        token_usage = res.get("token_usage", {})
+        total_tokens = token_usage.get("total_tokens", 0)
+
+        # Save assistant message with citation metadata & token metrics
         assistant_msg = ChatModel(
             id=str(uuid.uuid4()),
             user_id=current_user.id,
             document_id=req.document_id,
             role="assistant",
             content=res["answer"],
-            sources_json=json.dumps(res.get("sources", []))
+            sources_json=json.dumps(res.get("sources", [])),
+            model=res.get("model", selected_model),
+            token_count=total_tokens
         )
         session.add(assistant_msg)
         session.commit()
@@ -551,7 +581,8 @@ def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user
         return {
             "answer": res["answer"],
             "sources": res.get("sources", []),
-            "model": res.get("model", "gemini-2.5-flash"),
+            "model": res.get("model", selected_model),
+            "token_usage": token_usage,
             "mode": req.mode
         }
     finally:
@@ -593,8 +624,16 @@ def clear_chat_history(
         session.close()
 
 # ==============================================================
-# SETTINGS & API KEY
+# SETTINGS, MODELS & API KEY
 # ==============================================================
+
+@app.get("/api/models")
+def get_available_models():
+    """Returns supported AI models and token efficiency catalog."""
+    return {
+        "models": rag_service.get_supported_models(),
+        "default": "gemini-2.5-flash"
+    }
 
 @app.get("/api/settings/status")
 def get_settings_status():

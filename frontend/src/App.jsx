@@ -10,6 +10,7 @@ import {
   Search,
   Sparkles,
   ChevronRight,
+  ChevronDown,
   Settings,
   ArrowLeft,
   Send,
@@ -28,7 +29,11 @@ import {
   BookMarked,
   FileQuestion,
   TrendingUp,
-  Bookmark
+  Bookmark,
+  Cpu,
+  Zap,
+  List,
+  Layers
 } from 'lucide-react';
 
 export default function App() {
@@ -93,9 +98,19 @@ export default function App() {
   const [chatMode, setChatMode] = useState('document'); // 'document' or 'general'
   const chatScrollRef = useRef(null);
 
+  // Model & Token Optimization State
+  const [availableModels, setAvailableModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('gov_exam_selected_model') || 'gemini-2.5-flash');
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showTocDrawer, setShowTocDrawer] = useState(false);
+
   const authHeaders = () => {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
+
+  useEffect(() => {
+    fetchModels();
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -110,6 +125,12 @@ export default function App() {
       fetchPastStrategies();
     }
   }, [user, token]);
+
+  useEffect(() => {
+    if (user && token && activeTab === 'chat' && !activeWorkspaceDoc) {
+      fetchChatHistory(null);
+    }
+  }, [user, token, activeTab, activeWorkspaceDoc]);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -128,6 +149,10 @@ export default function App() {
         const data = await res.json();
         setUser(data.user);
         if (data.user.target_exam) setTargetExam(data.user.target_exam);
+        if (data.user.preferred_model) {
+          setSelectedModel(data.user.preferred_model);
+          localStorage.setItem('gov_exam_selected_model', data.user.preferred_model);
+        }
       } else {
         handleLogout();
       }
@@ -154,6 +179,10 @@ export default function App() {
         setToken(data.token);
         setUser(data.user);
         if (data.user.target_exam) setTargetExam(data.user.target_exam);
+        if (data.user.preferred_model) {
+          setSelectedModel(data.user.preferred_model);
+          localStorage.setItem('gov_exam_selected_model', data.user.preferred_model);
+        }
       } else {
         setAuthError(data.detail || 'Sign in failed. Please check your email & password.');
       }
@@ -233,6 +262,34 @@ export default function App() {
   // DATA FETCHING & API HANDLERS
   // ==========================================
 
+  const fetchModels = async () => {
+    try {
+      const res = await fetch('/api/models');
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableModels(data.models || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSelectModel = async (modelId) => {
+    setSelectedModel(modelId);
+    localStorage.setItem('gov_exam_selected_model', modelId);
+    if (token) {
+      try {
+        await fetch('/api/user', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ preferred_model: modelId })
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
   const fetchSettings = async () => {
     try {
       const res = await fetch('/api/settings/status');
@@ -299,7 +356,8 @@ export default function App() {
         body: JSON.stringify({
           exam_name: targetExam,
           daily_hours: parseFloat(dailyHours),
-          prep_level: prepLevel
+          prep_level: prepLevel,
+          model: selectedModel
         })
       });
       if (res.ok) {
@@ -386,16 +444,51 @@ export default function App() {
     }
   };
 
+  // Chat History Fetcher & Resumer
+  const fetchChatHistory = async (docId = null) => {
+    try {
+      const url = docId ? `/api/chat/history?document_id=${encodeURIComponent(docId)}` : '/api/chat/history';
+      const res = await fetch(url, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          setChatMessages(data.messages);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    // Default starter greeting if no prior conversation exists
+    if (docId) {
+      setChatMessages([
+        {
+          role: 'assistant',
+          content: 'Hello! I am your AI Study Mentor for this book. Ask me any conceptual doubt, formula explanation, or exam-style question.',
+          sources: []
+        }
+      ]);
+    } else {
+      setChatMessages([]);
+    }
+  };
+
+  const handleClearChatHistory = async () => {
+    if (!window.confirm('Clear conversation history?')) return;
+    try {
+      const docId = activeWorkspaceDoc?.id || null;
+      const url = docId ? `/api/chat/history?document_id=${encodeURIComponent(docId)}` : '/api/chat/history';
+      await fetch(url, { method: 'DELETE', headers: authHeaders() });
+      fetchChatHistory(docId);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleOpenWorkspace = (doc) => {
     setActiveWorkspaceDoc(doc);
     setChatMode('document');
-    setChatMessages([
-      {
-        role: 'assistant',
-        content: `I am your Faculty Mentor for **${doc.original_filename}**. Ask me any conceptual doubt, formula explanation, or exam-style question from this book.`,
-        sources: []
-      }
-    ]);
+    fetchChatHistory(doc.id);
   };
 
   const handleSendMessage = async (customPrompt = null) => {
@@ -418,7 +511,8 @@ export default function App() {
           mode: chatMode,
           document_id: activeWorkspaceDoc?.id || null,
           category: selectedCategory === 'all' ? null : selectedCategory,
-          query: textToSend
+          query: textToSend,
+          model: selectedModel
         })
       });
 
@@ -430,7 +524,8 @@ export default function App() {
             role: 'assistant',
             content: data.answer,
             sources: data.sources || [],
-            model: data.model
+            model: data.model,
+            token_usage: data.token_usage
           }
         ]);
       }
@@ -492,12 +587,12 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 font-sans">
         <div className="max-w-md w-full space-y-6 bg-slate-900/95 p-8 rounded-3xl border border-slate-800 shadow-2xl backdrop-blur-md">
-          {/* Academy Brand Header */}
+          {/* Portal Brand Header */}
           <div className="text-center">
             <div className="mx-auto w-12 h-12 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center text-amber-400 shadow-md mb-3">
               <GraduationCap className="w-7 h-7" />
             </div>
-            <h2 className="text-xl font-bold text-slate-100 tracking-tight">Sankalp Exam Academy</h2>
+            <h2 className="text-xl font-bold text-slate-100 tracking-tight">Govt Exam Study Portal</h2>
             <p className="mt-1 text-xs text-amber-400 font-medium tracking-wide uppercase">
               Target All India Rank (AIR) • 24/7 Faculty Mentorship
             </p>
@@ -681,7 +776,7 @@ export default function App() {
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="font-bold text-slate-100 tracking-wide text-sm">Sankalp Academy</h1>
+              <h1 className="font-bold text-slate-100 tracking-wide text-sm">Govt Exam Study Portal</h1>
               <p className="text-[11px] text-amber-400/90 font-medium">Topper's Study Platform</p>
             </div>
           </div>
@@ -741,7 +836,7 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => { setActiveTab('chat'); setActiveWorkspaceDoc(null); setChatMode('general'); }}
+              onClick={() => { setActiveTab('chat'); setActiveWorkspaceDoc(null); setChatMode('general'); fetchChatHistory(null); }}
               className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'chat' && !activeWorkspaceDoc
                   ? 'bg-amber-500 text-slate-950 shadow-sm'
@@ -795,6 +890,64 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-3">
+            {/* AI Model Selector Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-amber-300 text-xs font-semibold text-slate-800 bg-amber-50/70 hover:bg-amber-100/70 transition shadow-2xs"
+                title="Select AI Model"
+              >
+                <Cpu className="w-3.5 h-3.5 text-amber-600" />
+                <span className="font-bold">
+                  {availableModels.find(m => m.id === selectedModel)?.name || 'Gemini 2.5 Flash'}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-white/90 text-amber-900 border border-amber-200 font-semibold">
+                  {availableModels.find(m => m.id === selectedModel)?.badge || 'Fast'}
+                </span>
+                <ChevronDown className="w-3 h-3 text-slate-500" />
+              </button>
+
+              {showModelDropdown && (
+                <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-2 space-y-1">
+                  <div className="px-3 py-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between border-b border-slate-100">
+                    <span>Active AI Engine</span>
+                    <span className="text-[10px] text-amber-600 font-semibold">Token-Optimized</span>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto space-y-1 pt-1">
+                    {availableModels.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          handleSelectModel(m.id);
+                          setShowModelDropdown(false);
+                        }}
+                        className={`w-full text-left p-2.5 rounded-xl transition flex flex-col ${
+                          selectedModel === m.id
+                            ? 'bg-amber-500/10 border border-amber-500/40 text-amber-950 font-medium'
+                            : 'hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-900">{m.name}</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                            m.id === 'offline-curriculum'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}>
+                            {m.badge}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 mt-0.5 leading-snug">{m.description}</span>
+                        <div className="mt-1.5 flex items-center space-x-2 text-[10px]">
+                          <span className="text-amber-700 font-semibold">⚡ {m.token_efficiency}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={() => setShowSettingsModal(true)}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition"
@@ -840,12 +993,47 @@ export default function App() {
             {/* Left: Native PDF Viewer */}
             <div className="w-1/2 h-full border-r border-slate-200 bg-slate-100 flex flex-col">
               <div className="h-10 bg-white border-b border-slate-200 px-4 flex items-center justify-between text-xs font-semibold text-slate-700 shrink-0">
-                <span className="truncate max-w-[70%] flex items-center space-x-1.5">
+                <span className="truncate max-w-[50%] flex items-center space-x-1.5">
                   <BookMarked className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span className="truncate">{activeWorkspaceDoc.original_filename}</span>
                 </span>
-                <span className="text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-semibold">{activeWorkspaceDoc.category}</span>
+                <div className="flex items-center space-x-2">
+                  {activeWorkspaceDoc.toc && activeWorkspaceDoc.toc.length > 0 && (
+                    <button
+                      onClick={() => setShowTocDrawer(!showTocDrawer)}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold flex items-center space-x-1 border border-slate-200"
+                      title="View PyMuPDF Table of Contents"
+                    >
+                      <List className="w-3 h-3 text-amber-600" />
+                      <span>{activeWorkspaceDoc.toc.length} Chapters</span>
+                    </button>
+                  )}
+                  <span className="text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-semibold">
+                    {activeWorkspaceDoc.category}
+                  </span>
+                </div>
               </div>
+              {showTocDrawer && activeWorkspaceDoc.toc && activeWorkspaceDoc.toc.length > 0 && (
+                <div className="bg-amber-50/90 border-b border-amber-200 p-2.5 max-h-40 overflow-y-auto text-xs space-y-1">
+                  <div className="font-bold text-[10px] uppercase tracking-wider text-amber-900 mb-1 flex items-center justify-between">
+                    <span>PyMuPDF Detected Chapters & Sections:</span>
+                    <button onClick={() => setShowTocDrawer(false)} className="text-slate-400 hover:text-slate-600">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {activeWorkspaceDoc.toc.map((t, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => handleSendMessage(`Explain key exam concepts and formulas from Chapter: ${t.title}`)}
+                      className="cursor-pointer hover:bg-amber-100/70 p-1 rounded flex items-center justify-between text-[11px] text-slate-800 transition"
+                      title="Click to ask about this chapter"
+                    >
+                      <span className="truncate pr-2">• {t.title}</span>
+                      <span className="text-[10px] text-amber-800 font-mono shrink-0">Page {t.page}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex-1 w-full h-full relative">
                 <iframe
                   src={`/api/documents/${activeWorkspaceDoc.id}/raw?token=${encodeURIComponent(token)}`}
@@ -866,6 +1054,24 @@ export default function App() {
                 <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-line bg-white p-3.5 rounded-xl border border-amber-900/10 shadow-xs max-h-36 overflow-y-auto">
                   {activeWorkspaceDoc.summary || 'Analyzing chapter contents...'}
                 </div>
+              </div>
+
+              {/* Workspace Chat Header & Reset */}
+              <div className="px-4 py-2 border-b border-amber-900/10 bg-white flex items-center justify-between text-xs shrink-0">
+                <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+                  <Bot className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Chapter Q&A • Chat History Auto-Saved</span>
+                </div>
+                {chatMessages.length > 1 && (
+                  <button
+                    onClick={handleClearChatHistory}
+                    className="text-[11px] text-slate-400 hover:text-rose-600 flex items-center space-x-1 transition"
+                    title="Clear Discussion History"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Reset Chat</span>
+                  </button>
+                )}
               </div>
 
               {/* RAG Chat Messages */}
@@ -894,6 +1100,23 @@ export default function App() {
                               Page {s.page}
                             </span>
                           ))}
+                        </div>
+                      )}
+                      {msg.role === 'assistant' && (
+                        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                          <span className="font-semibold text-amber-700">
+                            {msg.model || 'Gemini 2.5 Flash'}
+                          </span>
+                          {msg.token_usage?.total_tokens > 0 ? (
+                            <span className="inline-flex items-center space-x-1 text-slate-600 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                              <span>⚡</span>
+                              <span>{msg.token_usage.total_tokens} tokens</span>
+                            </span>
+                          ) : msg.token_usage?.saved ? (
+                            <span className="inline-flex items-center space-x-1 text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              <span>⚡ 0 cloud tokens (Offline)</span>
+                            </span>
+                          ) : null}
                         </div>
                       )}
                     </div>
@@ -1129,17 +1352,34 @@ export default function App() {
                           </p>
                         </div>
 
-                        <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-[11px] text-slate-400 font-mono">
-                            {doc.page_count} Pages • {(doc.file_size / 1024).toFixed(0)} KB
-                          </span>
-                          <button
-                            onClick={() => handleOpenWorkspace(doc)}
-                            className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition shadow-xs"
-                          >
-                            <span>Open Reading Desk</span>
-                            <ChevronRight className="w-3 h-3" />
-                          </button>
+                        <div className="mt-5 pt-3 border-t border-slate-100 flex flex-col space-y-2">
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                            <span>{doc.page_count} Pages • {(doc.file_size / 1024).toFixed(0)} KB</span>
+                            {doc.chunk_count > 0 && (
+                              <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                {doc.chunk_count} Chunks
+                              </span>
+                            )}
+                          </div>
+                          {doc.toc && doc.toc.length > 0 && (
+                            <div className="text-[10px] text-slate-600 truncate flex items-center space-x-1">
+                              <List className="w-3 h-3 text-amber-600 shrink-0" />
+                              <span className="truncate">{doc.toc.length} Chapters indexed via PyMuPDF</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[10px] text-emerald-700 font-semibold flex items-center space-x-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>ChromaDB Vectorized</span>
+                            </span>
+                            <button
+                              onClick={() => handleOpenWorkspace(doc)}
+                              className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition shadow-xs"
+                            >
+                              <span>Open Reading Desk</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1159,9 +1399,25 @@ export default function App() {
                       <div className="text-[10px] text-slate-500">Ask any conceptual doubt, subject weightage question, or revision tip</div>
                     </div>
                   </div>
-                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                    Faculty Online
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono flex items-center space-x-1 border border-slate-200">
+                      <Cpu className="w-3 h-3 text-amber-600" />
+                      <span>{availableModels.find(m => m.id === selectedModel)?.name || 'Gemini 2.5 Flash'}</span>
+                    </span>
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      Faculty Online
+                    </span>
+                    {chatMessages.length > 0 && (
+                      <button
+                        onClick={handleClearChatHistory}
+                        className="text-[11px] text-slate-400 hover:text-rose-600 flex items-center space-x-1 transition px-2 py-1 rounded-lg border border-slate-200 hover:border-rose-200"
+                        title="Clear Discussion History"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Reset Chat</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div ref={chatScrollRef} className="flex-1 p-5 overflow-y-auto space-y-4 bg-[#fcfbf9]/40">
@@ -1187,6 +1443,23 @@ export default function App() {
                           }`}
                         >
                           <div className="whitespace-pre-line">{msg.content}</div>
+                          {msg.role === 'assistant' && (
+                            <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                              <span className="font-semibold text-amber-700">
+                                {msg.model || 'Gemini 2.5 Flash'}
+                              </span>
+                              {msg.token_usage?.total_tokens > 0 ? (
+                                <span className="inline-flex items-center space-x-1 text-slate-600 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                                  <span>⚡</span>
+                                  <span>{msg.token_usage.total_tokens} tokens</span>
+                                </span>
+                              ) : msg.token_usage?.saved ? (
+                                <span className="inline-flex items-center space-x-1 text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  <span>⚡ 0 cloud tokens (Offline)</span>
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -1356,6 +1629,24 @@ export default function App() {
             </div>
 
             <form onSubmit={handleSaveApiKey} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Preferred AI Model & Reasoning Engine</label>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => handleSelectModel(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs bg-white font-medium focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                >
+                  {availableModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.badge}) - {m.token_efficiency}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Switching models dynamically tunes token budget and explanation granularity.
+                </p>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Google Gemini API Key (Optional)</label>
                 <input

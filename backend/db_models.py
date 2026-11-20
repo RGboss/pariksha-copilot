@@ -34,6 +34,7 @@ class User(Base):
     password_hash = Column(String(256), nullable=True)
     salt = Column(String(64), nullable=True)
     target_exam = Column(String(120), default="SEBI Grade A (IT Stream)")
+    preferred_model = Column(String(50), default="gemini-2.5-flash")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
@@ -47,6 +48,7 @@ class User(Base):
             "name": self.name,
             "email": self.email,
             "target_exam": self.target_exam,
+            "preferred_model": self.preferred_model or "gemini-2.5-flash",
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
@@ -73,11 +75,21 @@ class Document(Base):
     vector_collection_id = Column(String(100), default="gov_exam_docs")
     page_count = Column(Integer, default=0)
     file_size = Column(Integer, default=0)
+    file_hash = Column(String(64), nullable=True)
+    toc_json = Column(Text, default="[]")
+    chunk_count = Column(Integer, default=0)
+    extracted_chars = Column(Integer, default=0)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="documents")
 
     def to_dict(self):
+        import json
+        toc = []
+        try:
+            toc = json.loads(self.toc_json or "[]")
+        except Exception:
+            toc = []
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -89,6 +101,10 @@ class Document(Base):
             "vector_collection_id": self.vector_collection_id,
             "page_count": self.page_count,
             "file_size": self.file_size,
+            "file_hash": self.file_hash,
+            "toc": toc,
+            "chunk_count": self.chunk_count or 0,
+            "extracted_chars": self.extracted_chars or 0,
             "uploaded_at": self.uploaded_at.isoformat() if self.uploaded_at else None
         }
 
@@ -125,6 +141,8 @@ class ChatHistory(Base):
     role = Column(String(20), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
     sources_json = Column(Text, default="[]")
+    model = Column(String(50), default="gemini-2.5-flash")
+    token_count = Column(Integer, default=0)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="chat_messages")
@@ -143,6 +161,8 @@ class ChatHistory(Base):
             "role": self.role,
             "content": self.content,
             "sources": sources,
+            "model": self.model or "gemini-2.5-flash",
+            "token_count": self.token_count or 0,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None
         }
 
@@ -156,6 +176,29 @@ def _run_migrations():
             conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(256)"))
         if "salt" not in existing_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN salt VARCHAR(64)"))
+        if "preferred_model" not in existing_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
+
+        # Check documents columns
+        doc_info = conn.execute(text("PRAGMA table_info(documents)")).fetchall()
+        doc_cols = [r[1] for r in doc_info]
+        if "file_hash" not in doc_cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN file_hash VARCHAR(64)"))
+        if "toc_json" not in doc_cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN toc_json TEXT DEFAULT '[]'"))
+        if "chunk_count" not in doc_cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN chunk_count INTEGER DEFAULT 0"))
+        if "extracted_chars" not in doc_cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN extracted_chars INTEGER DEFAULT 0"))
+
+        # Check chat_history columns
+        chat_info = conn.execute(text("PRAGMA table_info(chat_history)")).fetchall()
+        chat_cols = [r[1] for r in chat_info]
+        if "model" not in chat_cols:
+            conn.execute(text("ALTER TABLE chat_history ADD COLUMN model VARCHAR(50) DEFAULT 'gemini-2.5-flash'"))
+        if "token_count" not in chat_cols:
+            conn.execute(text("ALTER TABLE chat_history ADD COLUMN token_count INTEGER DEFAULT 0"))
+
         conn.commit()
 
 Base.metadata.create_all(bind=engine)

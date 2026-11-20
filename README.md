@@ -1,118 +1,111 @@
-# IT Officer Preparation Platform & AI Tutor
+# Pariksha Copilot (परीक्षा Copilot)
 
-A full-stack, book-oriented study and examination preparation platform for **SEBI Grade A (IT Stream)**, **SBI Specialist Cadre Officer (SCO - IT)**, and **IBPS SO (IT Officer)** exams.
+An AI-powered preparation platform and study copilot for Indian competitive examinations (**UPSC CSE, SEBI Grade A, SBI SCO, IBPS SO, SSC CGL, Banking & State PSCs**).
 
-The platform provides a comprehensive 6-stage, 21-chapter curriculum, 299+ categorized exam questions, an in-browser PDF library with PDF categorizer and viewer, and an AI Chatbot powered by **Google Gemini Embeddings & RAG** with source citations.
-
----
-
-## Key Highlights
-
-- **Scholarly & Bookish UI:** Designed for focused, distraction-free reading with Paper, Pure White, and Night themes, readable serif/sans typography, adjustable font sizes, and chapter progress tracking.
-- **21 Comprehensive Technical Chapters:** Spanning DBMS, Operating Systems, Networking, Data Structures & Algorithms, Software Engineering, Cloud & Security, Banking Regulations, and Python.
-- **PDF Library & Document Categorization:** Upload external PDFs or import from local workspace collections. Categorize as *Study Material*, *Question Bank*, *Previous Year Paper*, or *Syllabus / Regulations*.
-- **Integrated PDF Reader:** Read PDFs directly in-browser side-by-side with the AI assistant.
-- **RAG & Vector Search Engine:**
-  - Extracts and chunks documents with page-level metadata.
-  - Generates 768-dimensional vector embeddings using Google GenAI (`text-embedding-004`).
-  - Employs zero-dependency SQLite vector BLOB storage and fast NumPy cosine similarity search with term-overlap scoring.
-  - AI Assistant (`gemini-2.5-flash`) answers questions based on uploaded documents with clickable page citations.
-  - Graceful fallback mode ensures all viewer and search features function even before an API key is supplied.
-- **Self-Contained Architecture:** Single SQLite database (`data/study_portal.db`) for all user notes, reading progress, quiz scores, uploaded documents, vector chunks, and chat history.
+Pariksha Copilot combines an **Adaptive AI Strategy Generator**, a **Digital Book Vault** with split-screen reading desk, **PyMuPDF Structural Extraction**, and a **RAG-powered Faculty Mentor** supporting **Multi-Model Selection** (Gemini 2.5 Flash, Gemini 2.5 Pro, Gemini 1.5 Flash, Gemini 1.5 Pro, and Offline Curriculum Base) with token usage optimization.
 
 ---
 
-## Directory Layout
+## 🌟 Key Features
 
-```
-prep_platform/
-├── backend/
-│   ├── server.py              # FastAPI application, REST endpoints, static file server
-│   ├── db.py                  # SQLite schema, vector chunk persistence, chat storage
-│   ├── rag_engine.py          # Google Embeddings & RAG service, NumPy cosine similarity
-│   └── pdf_manager.py         # PDF text extraction, chunking, and metadata parsing
-├── static/
-│   ├── index.html             # Academic study interface with split-screen PDF/Chat workspace
-│   ├── app.js                 # Frontend application, reactive tabs, chat stream, PDF viewer
-│   └── styles.css             # Book-like styling, serif/sans switches, responsive grid
-├── data/
-│   ├── curriculum.json        # 6 Stages, 21 Chapters with comprehensive study material
-│   ├── extracted_qas.json     # 299+ parsed technical multiple-choice questions
-│   ├── study_portal.db        # SQLite database (documents, vectors, chat, progress)
-│   └── uploads/               # Managed document storage folder
-├── .env.example               # Template environment configuration
-├── requirements.txt           # Python dependencies
-├── run_server.py              # Launcher script
-└── start_server.bat           # Windows one-click batch launcher
-```
+1. **Multi-Model AI Engine:**
+   - **Gemini 2.5 Flash (Recommended):** High-velocity inference, optimal token economics, and sharp reasoning.
+   - **Gemini 2.5 Pro (Deep Thinker):** Multi-step analytical reasoning for complex syllabus breakdowns and numerical problems.
+   - **Gemini 1.5 Flash (Instant):** Streamlined, ultra-fast responses for quick doubt verification.
+   - **Gemini 1.5 Pro (Long-Form):** Extended context window across multi-chapter textbooks.
+   - **Offline Curriculum Base (100% Free / 0 Tokens):** Deterministic local semantic matching and standard syllabus doctrines without consuming any cloud API quota.
+
+2. **Token Usage Optimization:**
+   - **Dynamic Context Budgeting:** Filters and prunes retrieved RAG excerpts to top-k high-signal chunks (~1,100 tokens max), avoiding massive prompt token burns.
+   - **Summary Caching:** Auto-generated summaries are computed once on upload and cached in SQLite.
+   - **Real-Time Token Badges:** Every mentor response displays an efficiency indicator (e.g. `⚡ 804 tokens` or `⚡ 0 cloud tokens (Offline)`).
+
+3. **High-Performance PyMuPDF (`fitz`) Text & Outline Extraction:**
+   - **Book Outlines & Table of Contents (TOC):** Detects document chapter hierarchies with 1-click chapter jumps in the Reading Desk.
+   - **Structural Heading & Section Detection:** Tags chunks with `section_title` metadata for precise vector search citations.
+   - **Table Parsing:** Formats tables cleanly into structured Markdown.
+   - **Semantic Paragraph Chunking:** Chunks text at natural paragraph boundaries without truncating formulas or sentences.
+   - **Scanned PDF Fallback:** Graceful fallback support for image-only PDFs.
+
+4. **Split-Screen PDF Reading Desk:**
+   - Embedded native PDF viewer on the left side.
+   - High-Yield Chapter Digest & dedicated "Ask this Book" RAG chat panel on the right side.
+   - Clickable source citations with document names and page numbers.
+
+5. **Multi-User Isolation & Session Resumption:**
+   - Cryptographic PBKDF2-HMAC-SHA256 password hashing (100,000 iterations) with unique salts.
+   - Bearer session token authentication cleanly isolating documents, strategies, and chats per user.
+   - Multi-turn conversation history automatically saved to SQLite and resumed upon re-opening documents.
 
 ---
 
-## Quickstart Guide
+## 🛠️ Tech Stack
 
-### 1. Requirements
+- **Backend:** Python 3.10+, FastAPI, Uvicorn, SQLAlchemy, `google-genai` SDK, PyMuPDF (`pymupdf`), PyPDF.
+- **Frontend:** React (Vite), Tailwind CSS, Lucide Icons.
+- **Vector Database (RAG):** ChromaDB (Persistent local storage) with Google Embeddings (`text-embedding-004`) and deterministic offline vector fallback.
+- **Relational Database:** SQLite with SQLAlchemy (structured for easy migration to PostgreSQL).
+- **File Storage:** Local filesystem (`/uploads/{user_id}/{category}/{uuid}_{filename}.pdf`) with SHA-256 deduplication hashing.
 
-- Python 3.10+ (tested on Python 3.14)
-- Google Gemini API key (optional for offline features, required for live AI RAG)
+---
 
-### 2. Setup
+## 🚀 Quickstart Guide
 
-Clone the repository and install the dependencies:
+### 1. Prerequisites
+- Python 3.10 or higher
+- Node.js 18+ (for building frontend)
+- Google Gemini API key (optional for offline mode, recommended for live cloud AI)
+
+### 2. Installation
 
 ```bash
-git clone <repository-url>
-cd prep_platform
+# Clone the repository
+git clone https://github.com/RGboss/pariksha-copilot.git
+cd pariksha-copilot
+
+# Install Python backend dependencies
 python -m pip install -r requirements.txt
+
+# (Optional) Install frontend dependencies & build
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-### 3. Environment Configuration
+### 3. Environment Setup
 
-Copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set your Google Gemini API key:
+Create a `.env` file in the root directory:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-PORT=8000
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
 HOST=127.0.0.1
+PORT=8000
 ```
 
-*(Note: You can also set or change the Gemini API key anytime directly inside the web UI by clicking the Settings icon).*
-
-### 4. Running the Server
-
-Run via Python:
+### 4. Running the Application
 
 ```bash
 python run_server.py
 ```
 
-Or on Windows:
+Open your browser at **`http://127.0.0.1:8000`**.
 
-```cmd
-start_server.bat
-```
+---
 
-Open your web browser and navigate to:
-```
-http://127.0.0.1:8000
+## 🧪 Testing & Verification
+
+Run the automated test suites:
+
+```bash
+# Test multi-user auth and chat resumption
+python test_account_chat_resumption.py
+
+# Test multi-model selection, PyMuPDF extraction, and token optimization
+python test_powerful_pdf_and_models.py
 ```
 
 ---
 
-## API Overview
-
-- `GET /api/curriculum` - Full curriculum hierarchy and reading chapters.
-- `GET /api/documents` - List uploaded and indexed PDFs with category filtering.
-- `POST /api/documents/upload` - Upload and vectorize a new PDF document.
-- `GET /api/documents/workspace-available` - Scan workspace directories for existing study PDFs.
-- `POST /api/documents/import-workspace` - Ingest and index a workspace PDF.
-- `GET /api/documents/{id}/raw` - Stream PDF for the browser viewer.
-- `DELETE /api/documents/{id}` - Remove a document and its vector embeddings.
-- `POST /api/chat` - Perform semantic RAG Q&A over selected documents.
-- `GET /api/chat/history` - Retrieve prior conversation messages.
-- `POST /api/settings/api-key` - Configure API key at runtime.
+## 📄 License
+MIT License. Built for aspirants preparing for competitive examinations.

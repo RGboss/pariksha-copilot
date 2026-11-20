@@ -14,12 +14,26 @@ venv/
 ENV/
 env/
 
-# Database files
+# Database & Vector Store files
+data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/chroma_db/
 data/uploads/*
 !data/uploads/.gitkeep
+
+# User Uploaded Documents
+uploads/
+uploads/*
+!uploads/.gitkeep
+
+# Node & Frontend
+frontend/node_modules/
+node_modules/
+
+# Logs
+*.log
 
 # Editor & OS files
 .vscode/
