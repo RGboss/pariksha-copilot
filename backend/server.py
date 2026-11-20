@@ -44,6 +44,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/health")
+def health_check():
+    """Health check endpoint for platform monitoring."""
+    return {"status": "ok", "app": "pariksha-copilot", "version": "2.2.0"}
+
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
