@@ -52,6 +52,12 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
 
+  // Settings Modal State
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [newApiKey, setNewApiKey] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+  const [keySaveMsg, setKeySaveMsg] = useState(null);
+
   // Workspace Importer Modal State
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [availableWorkspacePdfs, setAvailableWorkspacePdfs] = useState([]);
@@ -197,6 +203,33 @@ export default function App() {
       console.error(err);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // Save API Key Handler
+  const handleSaveApiKey = async (e) => {
+    e.preventDefault();
+    if (!newApiKey.trim()) return;
+    setSavingKey(true);
+    setKeySaveMsg(null);
+    try {
+      const res = await fetch('/api/settings/api-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: newApiKey.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setKeySaveMsg({ type: 'success', text: 'API Key updated successfully! Live cloud models are active.' });
+        fetchSettings();
+        setTimeout(() => { setShowSettingsModal(false); setKeySaveMsg(null); setNewApiKey(''); }, 1500);
+      } else {
+        setKeySaveMsg({ type: 'error', text: data.detail || 'Failed to update key.' });
+      }
+    } catch (err) {
+      setKeySaveMsg({ type: 'error', text: 'Error connecting to backend server.' });
+    } finally {
+      setSavingKey(false);
     }
   };
 
@@ -385,7 +418,12 @@ export default function App() {
               <span className={`w-2 h-2 rounded-full ${settingsStatus.gemini_api_configured ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               <span>Gemini RAG</span>
             </span>
-            <span className="font-mono text-[11px] text-slate-400">{settingsStatus.chat_model}</span>
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="font-mono text-[11px] text-indigo-400 hover:text-indigo-300 underline"
+            >
+              Configure Key
+            </button>
           </div>
           <div className="mt-1 text-[11px] text-slate-500">ChromaDB • text-embedding-004</div>
         </div>
@@ -414,6 +452,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 shadow-xs transition"
+              title="Configure Google Gemini API Key"
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Settings</span>
+            </button>
+
             {activeTab === 'library' && !activeWorkspaceDoc && (
               <>
                 <button
@@ -913,6 +960,80 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+      {/* SETTINGS / API KEY MODAL */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-2">
+                <Settings className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-semibold text-slate-900">Platform & AI Settings</h3>
+              </div>
+              <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveApiKey} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Google Gemini API Key</label>
+                <input
+                  type="password"
+                  value={newApiKey}
+                  onChange={(e) => setNewApiKey(e.target.value)}
+                  placeholder="Paste your fresh GEMINI_API_KEY here..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Get a free Gemini API key at{' '}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-indigo-600 underline"
+                  >
+                    Google AI Studio
+                  </a>.
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
+                <div className="font-medium text-slate-800">Current Key Status:</div>
+                <div className="flex items-center space-x-2">
+                  <span className={`w-2 h-2 rounded-full ${settingsStatus.gemini_api_configured ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span>{settingsStatus.gemini_api_configured ? 'Configured (Active)' : 'Not Configured (Offline Engine Active)'}</span>
+                </div>
+                {settingsStatus.masked_key && (
+                  <div className="text-[11px] font-mono text-slate-500">Active: {settingsStatus.masked_key}</div>
+                )}
+              </div>
+
+              {keySaveMsg && (
+                <div className={`p-3 rounded-lg text-xs ${keySaveMsg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                  {keySaveMsg.text}
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="px-3.5 py-2 border border-slate-200 rounded-lg text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingKey || !newApiKey.trim()}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {savingKey ? 'Testing & Saving...' : 'Save & Activate'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -15,6 +15,8 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CHROMA_DIR = os.path.join(DATA_DIR, "chroma_db")
@@ -22,7 +24,10 @@ os.makedirs(CHROMA_DIR, exist_ok=True)
 
 class ChromaRAGService:
     def __init__(self):
-        self.chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+        self.chroma_client = chromadb.PersistentClient(
+            path=CHROMA_DIR,
+            settings=Settings(anonymized_telemetry=False, is_persistent=True)
+        )
         self.collection_name = "gov_exam_rag_docs"
         self.collection = self.chroma_client.get_or_create_collection(
             name=self.collection_name,
@@ -225,25 +230,67 @@ class ChromaRAGService:
         except Exception as e:
             return f"Overview for {filename}: High-yield technical document for {category}. (Auto-summary fallback: {e})"
 
+    def _build_rich_strategy_blueprint(self, exam_name: str, daily_hours: float, prep_level: str, api_error_note: Optional[str] = None) -> str:
+        """
+        Comprehensive built-in blueprint generator with exam patterns, subject breakdowns,
+        daily hourly schedules, and high-yield topics.
+        """
+        hours = float(daily_hours)
+        tech_hrs = round(hours * 0.55, 1)
+        mcq_hrs = round(hours * 0.25, 1)
+        rev_hrs = round(max(0.5, hours - tech_hrs - mcq_hrs), 1)
+
+        alert_banner = ""
+        if api_error_note:
+            alert_banner = (
+                f"> 💡 **Exam Mentor Notice:** *{api_error_note}*\n"
+                f"> *This blueprint has been synthesized using our comprehensive offline exam pattern & curriculum knowledge base.*\n\n"
+            )
+
+        return (
+            f"{alert_banner}# 🎯 Strategic Preparation Blueprint: {exam_name}\n\n"
+            f"**Aspirant Target:** {exam_name} | **Daily Time Budget:** {daily_hours} hrs/day | **Initial Prep Level:** {prep_level}\n\n"
+            f"---\n\n"
+            f"### 1. Executive Strategy & Exam Architecture\n"
+            f"For competitive examinations like **{exam_name}**, preparation must balance theoretical depth with sectional speed and accuracy under negative marking:\n"
+            f"- **Core Screening Filters:** Prelims / Phase 1 focuses heavily on speed-based Aptitude, English, and General Awareness, along with technical screening.\n"
+            f"- **Decisive Selection Merit:** The Mains / Phase 2 Specialist Paper (covering DBMS, Networking, OS, DSA, System Design, and Cyber Security) determines your final merit ranking.\n\n"
+            f"### 2. Daily Hourly Architecture ({daily_hours} Hours Total)\n"
+            f"- **Block A: Specialist Technical Domain ({tech_hrs} hrs)**\n"
+            f"  - Deep conceptual textbook reading and architecture diagrams.\n"
+            f"  - Handwritten summary of primary formulas, protocols, and standard SQL patterns.\n"
+            f"- **Block B: Question Bank & Timed MCQs ({mcq_hrs} hrs)**\n"
+            f"  - Active recall: Solve 40–60 topic-wise MCQs daily.\n"
+            f"  - Maintain an 'Error Logbook' of incorrect options and distractor traps.\n"
+            f"- **Block C: Rapid Recall & Revision ({rev_hrs} hrs)**\n"
+            f"  - Spaced repetition of previously studied chapters.\n"
+            f"  - Daily review of flashcards, ACID transaction rules, and subnet masks.\n\n"
+            f"### 3. Phase-by-Phase Roadmap\n\n"
+            f"#### 📅 Phase 1: Core Foundation & Theoretical Mastery (Weeks 1–6)\n"
+            f"- **DBMS & Advanced SQL:** ER modeling, Relational Algebra, Functional Dependencies, 1NF to BCNF, Serializability, MVCC, and complex analytical SQL joins.\n"
+            f"- **Operating Systems & Systems Engineering:** Process scheduling, Deadlock prevention (Banker's Algorithm), Virtual Memory, and Paging mechanics.\n"
+            f"- **Computer Networks:** OSI 7-Layer vs. TCP/IP, CIDR subnetting, TCP 3-way handshake, sliding window protocols, and TLS/HTTPS security.\n\n"
+            f"#### 📅 Phase 2: High-Volume Question Bank & Sectional Drilling (Weeks 7–10)\n"
+            f"- Work through uploaded Question Bank PDFs in the platform library.\n"
+            f"- Drill high-weightage topics: Data Structures (Trees, Graphs, Sorting complexity), Software Engineering (SDLC, Design Patterns), and Cloud / Cyber Security regulations.\n"
+            f"- Weekly sectional timed tests to build rapid question elimination technique.\n\n"
+            f"#### 📅 Phase 3: Simulated Mocks & Final Revision Cycles (Weeks 11–12)\n"
+            f"- Full-length 100-question timed mock tests in identical exam slots.\n"
+            f"- Strict target: >75% accuracy with zero unforced negative marks.\n"
+            f"- Formula sheets, port numbers, and protocol cheat sheets revision only.\n\n"
+            f"### 4. High-Yield Pitfalls to Avoid\n"
+            f"1. **Passive Reading Trap:** Do not read PDFs passively. Always test understanding using the quiz module and question bank immediately after reading.\n"
+            f"2. **Neglecting Non-Tech Cutoffs:** In banking/regulatory exams, scoring 0.25 below sectional cutoffs in English or Reasoning will invalidate high technical scores.\n"
+            f"3. **Ignoring Negative Marking:** Use intelligent elimination; avoid guessing when more than two distractors seem plausible."
+        )
+
     def generate_exam_strategy(self, exam_name: str, daily_hours: float, prep_level: str) -> str:
         """
         Generates a comprehensive, structured study strategy using Gemini with syllabus breakdown,
         timeline, daily timetable, and revision cycles.
         """
         if not self.is_configured():
-            return (
-                f"# Strategic Preparation Blueprint: {exam_name}\n\n"
-                f"**Target Exam:** {exam_name} | **Daily Commitment:** {daily_hours} hrs/day | **Level:** {prep_level}\n\n"
-                f"### Phase 1: Core Foundation & Theoretical Mastery (Weeks 1–6)\n"
-                f"- Focus on high-yield syllabus modules, standard university textbooks, and foundational concepts.\n"
-                f"- Dedicate {max(1.5, daily_hours * 0.4):.1f} hours daily to technical/specialist topics.\n\n"
-                f"### Phase 2: High-Volume Question Bank & Mock Practice (Weeks 7–10)\n"
-                f"- Solve minimum 50–70 sectional MCQs per day.\n"
-                f"- Analyze previous year question trends and common distractors.\n\n"
-                f"### Phase 3: Simulated Exam Mocks & Rapid Formula Revision (Weeks 11–12)\n"
-                f"- Take full-length timed mock tests in exact exam slots.\n"
-                f"- Consolidate concise handwritten formula sheets and error logs."
-            )
+            return self._build_rich_strategy_blueprint(exam_name, daily_hours, prep_level)
 
         prompt = (
             f"You are an expert exam strategist and faculty mentor for Indian Government and Banking examinations "
@@ -270,7 +317,9 @@ class ChromaRAGService:
         try:
             return self._call_with_retry_and_fallback(_do_strategy)
         except Exception as e:
-            return f"# Strategy Blueprint for {exam_name}\n\nFailed to generate online strategy ({e}). Please review standard curriculum guides."
+            err_msg = str(e)
+            user_note = "Your Google Gemini API Key was reported as leaked/invalid by Google AI Studio. Update with a fresh key to enable live cloud generation." if "leaked" in err_msg.lower() or "403" in err_msg else f"API Notice: {err_msg}"
+            return self._build_rich_strategy_blueprint(exam_name, daily_hours, prep_level, api_error_note=user_note)
 
     def answer_rag_query(self, query: str, doc_id: Optional[str] = None, category: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -362,10 +411,17 @@ class ChromaRAGService:
                 "model": self.active_chat_model
             }
         except Exception as e:
+            fallback_body = (
+                f"**Extracted Reference Excerpt ({sources[0]['filename']}, Page {sources[0]['page']}):**\n\n"
+                f"{retrieved_docs[0]}\n\n"
+                f"> 💡 *Notice: Cloud generation experienced an API issue ({e}). Displaying exact semantic excerpt retrieved from ChromaDB.*"
+                if retrieved_docs else
+                f"I could not locate specific matches for '{query}' in the indexed documents."
+            )
             return {
-                "answer": f"Encountered an issue generating response ({e}). Relevant text: {retrieved_docs[0] if retrieved_docs else 'None'}",
+                "answer": fallback_body,
                 "sources": sources,
-                "model": "error-fallback"
+                "model": "offline-vector-match"
             }
 
     def answer_general_mentor_query(self, query: str) -> Dict[str, Any]:
@@ -401,7 +457,17 @@ class ChromaRAGService:
             ans = self._call_with_retry_and_fallback(_do_mentor)
             return {"answer": ans, "sources": [], "model": self.active_chat_model}
         except Exception as e:
-            return {"answer": f"Mentor guidance fallback: {e}", "sources": [], "model": "error-fallback"}
+            return {
+                "answer": (
+                    f"**Faculty Mentor Insights on '{query}':**\n\n"
+                    f"1. **Syllabus & Weightage Alignment:** Prioritize high-scoring modules first (e.g. DBMS, Networking, OS, and Data Structures for IT officer exams; History, Polity, Geography for General exams).\n"
+                    f"2. **Daily Routine:** Maintain a 60/40 ratio between theoretical study and active MCQ practice under timed conditions.\n"
+                    f"3. **Error Analysis:** Thoroughly analyze every incorrect option in your mock tests to avoid repeating conceptual traps.\n\n"
+                    f"> 💡 *Notice: To enable live cloud Gemini mentoring responses, update your API key in Settings or `.env`.*"
+                ),
+                "sources": [],
+                "model": "offline-curriculum-mentor"
+            }
 
 # Singleton instance
 rag_service = ChromaRAGService()
