@@ -1,0 +1,11 @@
+{
+  "pariksha-health-check": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "powershell -ExecutionPolicy Bypass -File ./scripts/check-session-health.ps1",
+        "timeout": 15
+      }
+    ]
+  }
+}

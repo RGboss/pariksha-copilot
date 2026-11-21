@@ -1,0 +1,10 @@
+{
+  "name": "pariksha-copilot-ops",
+  "description": "Operations, container health diagnostics, and production safety guards for Pariksha Copilot",
+  "version": "1.0.0",
+  "author": "Pariksha Copilot Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RGboss/pariksha-copilot"
+  }
+}
