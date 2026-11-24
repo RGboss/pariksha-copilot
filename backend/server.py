@@ -118,8 +118,12 @@ class ChatRequest(BaseModel):
     mode: str = "document"  # "document" or "general"
     document_id: Optional[str] = None
     category: Optional[str] = None
-    query: str
+    query: Optional[str] = None
+    message: Optional[str] = None
     model: Optional[str] = None
+
+    def get_query_text(self) -> str:
+        return (self.query or self.message or "").strip()
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -214,7 +218,7 @@ def signup(req: SignupRequest):
         session.refresh(new_user)
         user_dict = new_user.to_dict()
 
-        token = create_user_session(new_user.id)
+        token = create_user_session(new_user.id, session=session)
         return {
             "token": token,
             "user": user_dict
@@ -235,7 +239,7 @@ def login(req: LoginRequest):
             raise HTTPException(status_code=401, detail="Invalid email or password.")
 
         user_dict = user.to_dict()
-        token = create_user_session(user.id)
+        token = create_user_session(user.id, session=session)
         return {
             "token": token,
             "user": user_dict
@@ -584,6 +588,10 @@ def import_workspace_document(
 
 @app.post("/api/chat")
 def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user)):
+    query_text = req.get_query_text()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Query or message is required.")
+
     session = SessionLocal()
     try:
         # Save user message
@@ -592,7 +600,7 @@ def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user
             user_id=current_user.id,
             document_id=req.document_id,
             role="user",
-            content=req.query
+            content=query_text
         )
         session.add(user_msg)
         session.commit()
@@ -602,10 +610,10 @@ def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user
 
         # Execute Query with User Scoping & Model Selection
         if req.mode == "general":
-            res = rag_service.answer_general_mentor_query(req.query, model=selected_model)
+            res = rag_service.answer_general_mentor_query(query_text, model=selected_model)
         else:
             res = rag_service.answer_rag_query(
-                query=req.query,
+                query=query_text,
                 doc_id=req.document_id,
                 category=req.category,
                 user_id=current_user.id,
@@ -631,6 +639,7 @@ def chat_with_ai(req: ChatRequest, current_user: User = Depends(get_current_user
 
         return {
             "answer": res["answer"],
+            "response": res["answer"],
             "sources": res.get("sources", []),
             "model": res.get("model", selected_model),
             "token_usage": token_usage,
@@ -903,11 +912,20 @@ STATIC_LEGACY = os.path.join(BASE_DIR, "static")
 
 if os.path.exists(FRONTEND_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
-    @app.get("/")
-    def serve_frontend():
+
+    @app.get("/{full_path:path}")
+    def serve_frontend_spa(full_path: str):
+        # Exclude /api, /health, /docs, /openapi.json which are matched by route precedence
+        potential_file = os.path.join(FRONTEND_DIST, full_path)
+        if full_path and os.path.isfile(potential_file):
+            return FileResponse(potential_file)
         return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 elif os.path.exists(STATIC_LEGACY):
     app.mount("/static", StaticFiles(directory=STATIC_LEGACY), name="static")
-    @app.get("/")
-    def serve_legacy_frontend():
+
+    @app.get("/{full_path:path}")
+    def serve_legacy_spa(full_path: str):
+        potential_file = os.path.join(STATIC_LEGACY, full_path)
+        if full_path and os.path.isfile(potential_file):
+            return FileResponse(potential_file)
         return FileResponse(os.path.join(STATIC_LEGACY, "index.html"))

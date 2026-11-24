@@ -6,9 +6,17 @@
 
 [CmdletBinding()]
 param (
-    [string]$RepoPath = (Resolve-Path "$PSScriptRoot\..\..").Path,
+    [string]$RepoPath = "",
     [switch]$Force
 )
+
+if (-not $RepoPath) {
+    if ($PSScriptRoot) {
+        $RepoPath = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    } else {
+        $RepoPath = "E:\study material\prep_platform"
+    }
+}
 
 $TaskName = "ParikshaCopilotAutoStart"
 $ScriptToRun = Join-Path $RepoPath "scripts\windows-startup\start-pariksha-copilot.ps1"

@@ -31,12 +31,21 @@ if raw_db_url:
 else:
     DATABASE_URL = f"sqlite:///{DB_PATH}"
 
+from sqlalchemy import event
+
 # Connection Engine
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
-        connect_args={"check_same_thread": False}
+        connect_args={"check_same_thread": False, "timeout": 30}
     )
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 else:
     engine = create_engine(
         DATABASE_URL,
@@ -399,9 +408,12 @@ def verify_password(password: str, salt: str, password_hash: str) -> bool:
     ).hex()
     return secrets.compare_digest(computed, password_hash)
 
-def create_user_session(user_id: str, days: int = 30) -> str:
+def create_user_session(user_id: str, days: int = 30, session: Optional[Any] = None) -> str:
     """Generates an authenticated session token for the user."""
-    session = SessionLocal()
+    own_session = False
+    if session is None:
+        session = SessionLocal()
+        own_session = True
     try:
         token = secrets.token_urlsafe(32)
         expires_at = datetime.utcnow() + timedelta(days=days)
@@ -410,7 +422,8 @@ def create_user_session(user_id: str, days: int = 30) -> str:
         session.commit()
         return token
     finally:
-        session.close()
+        if own_session:
+            session.close()
 
 def get_user_from_token(token: str) -> Optional[User]:
     """Retrieves the active user matching the bearer session token."""

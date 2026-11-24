@@ -6,12 +6,20 @@
 
 [CmdletBinding()]
 param (
-    [string]$RepoPath = (Resolve-Path "$PSScriptRoot\..\..").Path,
+    [string]$RepoPath = "",
     [string]$TargetUrl = "http://localhost:8082/health",
     [int]$MaxWaitSeconds = 120
 )
 
 $ErrorActionPreference = "Continue"
+
+if (-not $RepoPath) {
+    if ($PSScriptRoot) {
+        $RepoPath = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    } else {
+        $RepoPath = "E:\study material\prep_platform"
+    }
+}
 $LogFile = Join-Path $env:USERPROFILE "pariksha-copilot-startup.log"
 
 function Write-Log {

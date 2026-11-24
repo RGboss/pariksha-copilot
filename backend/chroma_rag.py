@@ -53,6 +53,7 @@ class ChromaRAGService:
             "gemini-1.5-pro"
         ]
         self.active_chat_model = self.candidate_models[0]
+        self.embedding_api_available = True
         self._load_client()
 
     def _load_client(self):
@@ -60,11 +61,14 @@ class ChromaRAGService:
         if api_key:
             try:
                 self.genai_client = genai.Client(api_key=api_key)
+                self.embedding_api_available = True
             except Exception as e:
                 print(f"[RAG] Warning: genai.Client init failed: {e}")
                 self.genai_client = None
+                self.embedding_api_available = False
         else:
             self.genai_client = None
+            self.embedding_api_available = False
 
     def is_configured(self) -> bool:
         return self.genai_client is not None
@@ -137,6 +141,11 @@ class ChromaRAGService:
                     return func(model_name, *args, **kwargs)
                 except Exception as e:
                     err_str = str(e).lower()
+                    is_fatal_auth = any(x in err_str for x in ["api_key_invalid", "invalid_argument", "unauthenticated", "permission_denied", "api key not valid", "400 invalid_argument"])
+                    if is_fatal_auth:
+                        print(f"[RAG] Permanent API key error on {model_name}: {e}. Halting remote retries.")
+                        raise e
+
                     is_transient = any(x in err_str for x in ["503", "unavailable", "429", "quota", "resource_exhausted", "timeout"])
                     if is_transient and attempt < max_retries - 1:
                         sleep_time = (backoff ** attempt) + random.uniform(0.2, 0.5)
@@ -148,24 +157,8 @@ class ChromaRAGService:
 
         raise RuntimeError("All Gemini candidate models and retries were exhausted.")
 
-    def get_embedding(self, text: str) -> List[float]:
-        """
-        Generates 768-dim float embedding using text-embedding-004 with fallback.
-        """
-        if self.genai_client:
-            try:
-                res = self.genai_client.models.embed_content(
-                    model=self.embedding_model,
-                    contents=text[:2000]
-                )
-                if hasattr(res, 'embedding') and hasattr(res.embedding, 'values'):
-                    return list(res.embedding.values)
-                elif hasattr(res, 'embeddings') and res.embeddings:
-                    return list(res.embeddings[0].values)
-            except Exception as e:
-                print(f"[RAG] Warning: Remote embedding API call failed ({e}). Using deterministic pseudo-vector.")
-
-        # Deterministic 768-dim pseudo vector for offline / rate-limit resilience
+    def _compute_pseudo_vector(self, text: str) -> List[float]:
+        """Deterministic 768-dim pseudo vector for offline / rate-limit resilience."""
         vec = [0.0] * 768
         words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
         for w in words:
@@ -176,6 +169,73 @@ class ChromaRAGService:
         if norm > 0:
             vec = [x / norm for x in vec]
         return vec
+
+    def get_embedding(self, text: str) -> List[float]:
+        """
+        Generates 768-dim float embedding using text-embedding-004 with fallback and circuit breaker.
+        """
+        if self.genai_client and self.embedding_api_available:
+            try:
+                res = self.genai_client.models.embed_content(
+                    model=self.embedding_model,
+                    contents=text[:2000]
+                )
+                if hasattr(res, 'embedding') and hasattr(res.embedding, 'values'):
+                    return list(res.embedding.values)
+                elif hasattr(res, 'embeddings') and res.embeddings:
+                    return list(res.embeddings[0].values)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "api_key_invalid" in err_str or "invalid_argument" in err_str or "permission" in err_str:
+                    print(f"[RAG] Permanent embedding API error ({e}). Circuit breaker activated: using offline vectors.")
+                    self.embedding_api_available = False
+                else:
+                    print(f"[RAG] Warning: Remote embedding API call failed ({e}). Using deterministic pseudo-vector.")
+
+        return self._compute_pseudo_vector(text)
+
+    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generates embeddings in efficient batches with automatic fallback.
+        """
+        if not texts:
+            return []
+
+        if not self.genai_client or not self.embedding_api_available:
+            return [self._compute_pseudo_vector(t) for t in texts]
+
+        results = []
+        batch_size = 50
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            if not self.embedding_api_available or not self.genai_client:
+                for t in batch:
+                    results.append(self._compute_pseudo_vector(t))
+                continue
+
+            trimmed = [t[:2000] for t in batch]
+            try:
+                res = self.genai_client.models.embed_content(
+                    model=self.embedding_model,
+                    contents=trimmed
+                )
+                if hasattr(res, 'embeddings') and res.embeddings:
+                    for emb in res.embeddings:
+                        results.append(list(emb.values))
+                else:
+                    for t in batch:
+                        results.append(self._compute_pseudo_vector(t))
+            except Exception as e:
+                err_str = str(e).lower()
+                if "api_key_invalid" in err_str or "invalid_argument" in err_str or "permission" in err_str:
+                    print(f"[RAG] Permanent embedding API error in batch ({e}). Disabling remote embeddings.")
+                    self.embedding_api_available = False
+                else:
+                    print(f"[RAG] Batch embedding error ({e}). Falling back to local vectors.")
+                for t in batch:
+                    results.append(self._compute_pseudo_vector(t))
+
+        return results
 
     def extract_and_chunk_pdf(self, file_path: str, chunk_size: int = 850, overlap: int = 150) -> Dict[str, Any]:
         """
@@ -348,15 +408,15 @@ class ChromaRAGService:
             }
 
         ids = []
-        embeddings = []
         documents = []
         metadatas = []
 
-        for c in chunks:
+        chunk_texts = [c['text'] for c in chunks]
+        embeddings = self.get_embeddings_batch(chunk_texts)
+
+        for i, c in enumerate(chunks):
             c_id = f"{doc_id}_{c['chunk_index']}"
-            vec = self.get_embedding(c['text'])
             ids.append(c_id)
-            embeddings.append(vec)
             documents.append(c['text'])
             metadatas.append({
                 "doc_id": doc_id,
@@ -390,6 +450,59 @@ class ChromaRAGService:
             self.collection.delete(where={"doc_id": doc_id})
         except Exception as e:
             print(f"[RAG] Warning deleting ChromaDB vectors for {doc_id}: {e}")
+
+    def query_relevant_chunks(
+        self,
+        query_text: str,
+        user_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+        category: Optional[str] = None,
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves top-k relevant document chunks with metadata for quizzes, flashcards, and citations.
+        """
+        query_vec = self.get_embedding(query_text)
+        filters = []
+        if user_id:
+            filters.append({"user_id": user_id})
+        if document_id:
+            filters.append({"doc_id": document_id})
+        if category and category.lower() != "all":
+            filters.append({"category": category})
+
+        where_filter = None
+        if len(filters) == 1:
+            where_filter = filters[0]
+        elif len(filters) > 1:
+            where_filter = {"$and": filters}
+
+        query_args = {
+            "query_embeddings": [query_vec],
+            "n_results": top_k
+        }
+        if where_filter:
+            query_args["where"] = where_filter
+
+        try:
+            results = self.collection.query(**query_args)
+        except Exception as e:
+            print(f"[RAG] ChromaDB query error in query_relevant_chunks: {e}")
+            return []
+
+        retrieved_docs = results.get("documents", [[]])[0] if results.get("documents") else []
+        retrieved_meta = results.get("metadatas", [[]])[0] if results.get("metadatas") else []
+
+        chunks = []
+        for text, meta in zip(retrieved_docs, retrieved_meta):
+            chunks.append({
+                "text": text,
+                "page": meta.get("page_number", 1) if meta else 1,
+                "section": meta.get("section_title", "") if meta else "",
+                "filename": meta.get("filename", "") if meta else "",
+                "doc_id": meta.get("doc_id", "") if meta else ""
+            })
+        return chunks
 
     def generate_quick_summary(self, file_path: str, filename: str, category: str, model: Optional[str] = None) -> str:
         """
