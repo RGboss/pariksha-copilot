@@ -2,6 +2,7 @@ package com.pariksha.copilot.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,7 +30,6 @@ import com.pariksha.copilot.AppUiState
 import com.pariksha.copilot.data.ChatMessage
 import com.pariksha.copilot.ui.components.MarkdownText
 import com.pariksha.copilot.ui.theme.*
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,7 +42,6 @@ fun ChatScreen(
 ) {
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
 
     // Auto-scroll to bottom when new messages arrive
@@ -53,220 +52,277 @@ fun ChatScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Top Bar
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        "Pariksha Copilot",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        uiState.targetExam,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            actions = {
-                // Model indicator chip
-                AssistChip(
-                    onClick = onNavigateToSettings,
-                    label = {
-                        Text(
-                            uiState.selectedModel.replace("gemini-", "").uppercase(),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Memory,
-                            contentDescription = "Model",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    modifier = Modifier.height(28.dp)
-                )
-
-                IconButton(onClick = onClearChat) {
-                    Icon(Icons.Default.DeleteSweep, "Clear chat")
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
-        )
-
-        // API Key Warning
-        if (!uiState.isApiKeyConfigured) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Warning.copy(alpha = 0.15f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Warning, "Warning", tint = Warning, modifier = Modifier.size(20.dp))
-                    Text(
-                        "No API key configured.",
-                        color = Warning,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onNavigateToSettings) {
-                        Text("Set up →", color = Warning)
-                    }
-                }
-            }
-        }
-
-        // Error Snackbar
-        uiState.errorMessage?.let { error ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Error.copy(alpha = 0.15f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Error, "Error", tint = Error, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(error, color = Error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismissError, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, "Dismiss", tint = Error, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
-
-        // Chat Messages
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
-        ) {
-            // Welcome message if no messages
-            if (uiState.messages.isEmpty() && uiState.streamingText.isEmpty()) {
-                item {
-                    WelcomeCard(
-                        targetExam = uiState.targetExam,
-                        onSuggestionClick = { suggestion ->
-                            onSendMessage(suggestion)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "AI Tutor & Copilot",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = Amber500.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    uiState.targetExam.take(14) + if (uiState.targetExam.length > 14) "…" else "",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Amber400,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                            }
                         }
-                    )
-                }
-            }
-
-            items(uiState.messages, key = { it.id }) { message ->
-                ChatBubble(message = message)
-            }
-
-            // Streaming response
-            if (uiState.streamingText.isNotEmpty()) {
-                item {
-                    ChatBubble(
-                        message = ChatMessage(
-                            role = "model",
-                            content = uiState.streamingText
+                        Text(
+                            "Multi-model cognitive reasoning & syllabus retrieval",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Slate400
+                            )
                         )
+                    }
+                },
+                actions = {
+                    // Model indicator chip
+                    AssistChip(
+                        onClick = onNavigateToSettings,
+                        label = {
+                            Text(
+                                uiState.selectedModel.replace("gemini-", "").uppercase(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Amber400
+                                )
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Memory,
+                                contentDescription = "Model",
+                                tint = Amber400,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = Slate800,
+                            labelColor = Amber400
+                        ),
+                        border = AssistChipDefaults.assistChipBorder(
+                            enabled = true,
+                            borderColor = Amber500.copy(alpha = 0.4f)
+                        ),
+                        modifier = Modifier.height(28.dp)
                     )
-                }
-            }
 
-            // Loading indicator
-            if (uiState.isGenerating && uiState.streamingText.isEmpty()) {
-                item {
+                    Spacer(Modifier.width(4.dp))
+
+                    IconButton(onClick = onClearChat) {
+                        Icon(Icons.Default.DeleteSweep, "Clear chat", tint = Slate400)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Slate900
+                )
+            )
+        },
+        containerColor = Slate950
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // API Key Warning
+            if (!uiState.isApiKeyConfigured) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Amber500.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.3f))
+                ) {
                     Row(
-                        modifier = Modifier.padding(start = 8.dp, top = 4.dp),
+                        modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Icon(Icons.Default.VpnKey, "Key Missing", tint = Amber400, modifier = Modifier.size(20.dp))
                         Text(
-                            "Thinking...",
+                            "Gemini API key is not configured. Add your key to start chats.",
+                            color = Slate200,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            modifier = Modifier.weight(1f)
                         )
+                        Button(
+                            onClick = onNavigateToSettings,
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Amber500,
+                                contentColor = Slate950
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("Setup Key", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                        }
                     }
                 }
             }
-        }
 
-        // Input Bar
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp
-        ) {
-            Row(
+            // Error Banner
+            uiState.errorMessage?.let { error ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Rose500.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Error, "Error", tint = Rose400, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(error, color = Rose400, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        IconButton(onClick = onDismissError, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, "Dismiss", tint = Rose400, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            // Chat Messages List
+            LazyColumn(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .navigationBarsPadding(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 14.dp)
             ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(
-                            "Ask about ${uiState.targetExam}…",
-                            style = MaterialTheme.typography.bodyMedium
+                if (uiState.messages.isEmpty() && uiState.streamingText.isEmpty()) {
+                    item {
+                        ScholarlyWelcomeCard(
+                            targetExam = uiState.targetExam,
+                            onSuggestionClick = { suggestion ->
+                                onSendMessage(suggestion)
+                            }
                         )
-                    },
-                    maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = {
+                    }
+                }
+
+                items(uiState.messages, key = { it.id }) { message ->
+                    ScholarlyChatBubble(message = message)
+                }
+
+                if (uiState.streamingText.isNotEmpty()) {
+                    item {
+                        ScholarlyChatBubble(
+                            message = ChatMessage(
+                                role = "model",
+                                content = uiState.streamingText
+                            )
+                        )
+                    }
+                }
+
+                if (uiState.isGenerating && uiState.streamingText.isEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 8.dp, top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Amber400
+                            )
+                            Text(
+                                "Analyzing syllabus and generating response...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Input Section
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Slate900,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .navigationBarsPadding(),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                "Ask syllabus, PYQs, high-yield notes…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Slate500
+                            )
+                        },
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                if (inputText.isNotBlank() && !uiState.isGenerating) {
+                                    onSendMessage(inputText)
+                                    inputText = ""
+                                    focusManager.clearFocus()
+                                }
+                            }
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Slate950,
+                            unfocusedContainerColor = Slate950,
+                            focusedBorderColor = Amber500,
+                            unfocusedBorderColor = Slate700,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Slate100
+                        )
+                    )
+
+                    FilledIconButton(
+                        onClick = {
                             if (inputText.isNotBlank() && !uiState.isGenerating) {
                                 onSendMessage(inputText)
                                 inputText = ""
                                 focusManager.clearFocus()
                             }
-                        }
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                    )
-                )
-
-                FilledIconButton(
-                    onClick = {
-                        if (inputText.isNotBlank() && !uiState.isGenerating) {
-                            onSendMessage(inputText)
-                            inputText = ""
-                            focusManager.clearFocus()
-                        }
-                    },
-                    enabled = inputText.isNotBlank() && !uiState.isGenerating,
-                    modifier = Modifier.size(48.dp),
-                    shape = CircleShape
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send"
-                    )
+                        },
+                        enabled = inputText.isNotBlank() && !uiState.isGenerating,
+                        modifier = Modifier.size(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Amber500,
+                            contentColor = Slate950,
+                            disabledContainerColor = Slate800,
+                            disabledContentColor = Slate600
+                        )
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -274,7 +330,7 @@ fun ChatScreen(
 }
 
 @Composable
-fun ChatBubble(message: ChatMessage) {
+fun ScholarlyChatBubble(message: ChatMessage) {
     val isUser = message.role == "user"
 
     Row(
@@ -282,36 +338,37 @@ fun ChatBubble(message: ChatMessage) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (!isUser) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(PrimaryBlue),
-                contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(32.dp),
+                shape = CircleShape,
+                color = Amber500.copy(alpha = 0.2f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
             ) {
-                Text("AI", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Box(contentAlignment = Alignment.Center) {
+                    Text("AI", color = Amber400, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(Modifier.width(8.dp))
         }
 
         Surface(
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 330.dp),
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = if (isUser) 14.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 14.dp
             ),
             color = if (isUser) {
-                PrimaryBlue
+                Blue600
             } else if (message.isError) {
-                Error.copy(alpha = 0.15f)
+                Rose500.copy(alpha = 0.15f)
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                Slate900
             },
-            tonalElevation = if (isUser) 0.dp else 1.dp
+            border = if (!isUser && !message.isError) androidx.compose.foundation.BorderStroke(1.dp, Slate800) else null
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
                 if (isUser) {
                     Text(
                         text = message.content,
@@ -321,7 +378,7 @@ fun ChatBubble(message: ChatMessage) {
                 } else {
                     MarkdownText(
                         markdown = message.content,
-                        color = if (message.isError) Error else MaterialTheme.colorScheme.onSurface
+                        color = if (message.isError) Rose400 else Slate100
                     )
                 }
             }
@@ -329,79 +386,117 @@ fun ChatBubble(message: ChatMessage) {
 
         if (isUser) {
             Spacer(Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(AccentGold),
-                contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(32.dp),
+                shape = CircleShape,
+                color = Blue500.copy(alpha = 0.2f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Blue500.copy(alpha = 0.4f))
             ) {
-                Text("You", color = SurfaceDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Box(contentAlignment = Alignment.Center) {
+                    Text("YOU", color = Blue400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
 }
 
 @Composable
-fun WelcomeCard(
+fun ScholarlyWelcomeCard(
     targetExam: String,
     onSuggestionClick: (String) -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        shape = RoundedCornerShape(20.dp)
+            .padding(vertical = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        shape = RoundedCornerShape(16.dp),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = androidx.compose.ui.graphics.SolidColor(Slate800)
+        )
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier.padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("🎓", fontSize = 48.sp)
+            Surface(
+                shape = CircleShape,
+                color = Amber500.copy(alpha = 0.12f),
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.School,
+                        contentDescription = null,
+                        tint = Amber400,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+
             Text(
-                "Pariksha Copilot",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                "Your AI tutor for $targetExam preparation.\nAsk anything about syllabus, PYQs, strategy, or concepts.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
+                "Aspirant Copilot Active",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Text(
+                "Trained on official syllabus guides, previous year question trends, and high-yield retention summaries for $targetExam.",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    color = Slate300,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
+            )
+
+            HorizontalDivider(color = Slate800)
 
             Text(
-                "Quick Start",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
+                "High-Yield Starting Prompts",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = Amber400,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
             )
 
             val suggestions = listOf(
-                "📋 Give me a 3-month study plan for $targetExam",
-                "📝 List the most important topics by weightage",
-                "🧠 Quiz me on current affairs (last 3 months)",
-                "📖 Explain the exam pattern and marking scheme"
+                "Explain the high-scoring strategy & weightage for $targetExam",
+                "Give me a 30-day revision timetable with daily mock goals",
+                "Generate 5 tricky MCQs on current financial & regulatory norms",
+                "Break down the hardest topic in my syllabus with analogies"
             )
 
             suggestions.forEach { suggestion ->
-                OutlinedButton(
-                    onClick = { onSuggestionClick(suggestion.substringAfter(" ")) },
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate950),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(Slate800)
+                    ),
+                    onClick = { onSuggestionClick(suggestion) }
                 ) {
-                    Text(
-                        suggestion,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Start,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = Amber400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            suggestion,
+                            style = MaterialTheme.typography.bodySmall.copy(color = Slate200),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
