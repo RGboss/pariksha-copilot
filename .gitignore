@@ -42,3 +42,12 @@ node_modules/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Android build outputs & local config
+.gradle/
+build/
+android-app/build/
+android-app/app/build/
+local.properties
+*.apk
+*.aab
