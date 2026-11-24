@@ -51,3 +51,8 @@ android-app/app/build/
 local.properties
 *.apk
 *.aab
+*.zip
+jdk-17/
+android-sdk/
+android-studio/
+test_loop_status.json
