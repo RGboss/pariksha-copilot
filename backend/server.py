@@ -514,13 +514,39 @@ def get_available_workspace_pdfs(current_user: User = Depends(get_current_user))
     return {"available": available, "total": len(available)}
 
 @app.post("/api/documents/import-workspace")
-def import_workspace_document(
-    full_path: str = Form(...),
-    category: str = Form("Study Material"),
+async def import_workspace_document(
+    request: Request,
     current_user: User = Depends(get_current_user)
 ):
+    content_type = request.headers.get("content-type", "")
+    full_path = None
+    category = "Study Material"
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            full_path = body.get("full_path") or body.get("rel_path") or body.get("relative_path")
+            category = body.get("category", "Study Material")
+        except Exception:
+            pass
+
+    if not full_path:
+        try:
+            form = await request.form()
+            full_path = form.get("full_path") or form.get("rel_path") or form.get("relative_path")
+            category = form.get("category", "Study Material")
+        except Exception:
+            pass
+
+    if not full_path:
+        raise HTTPException(status_code=400, detail="Missing full_path or rel_path parameter.")
+
+    workspace_root = os.path.dirname(BASE_DIR)
+    if not os.path.isabs(full_path):
+        full_path = os.path.abspath(os.path.join(workspace_root, full_path))
+
     if not os.path.exists(full_path) or not full_path.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Specified workspace file does not exist or is not a PDF.")
+        raise HTTPException(status_code=400, detail=f"Specified workspace file does not exist or is not a PDF: {full_path}")
 
     session = SessionLocal()
     try:
@@ -818,7 +844,7 @@ def submit_quiz(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Quiz not found.")
-    return {"status": "success", "attempt": result}
+    return {"status": "success", "attempt": result, **result}
 
 # ==============================================================
 # STUDY PLANNER, REVISION CHECKLIST & STATS

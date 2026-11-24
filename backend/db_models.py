@@ -227,9 +227,12 @@ class Flashcard(Base):
             "document_id": self.document_id,
             "category": self.category,
             "front_prompt": self.front_prompt,
+            "front": self.front_prompt,
             "back_answer": self.back_answer,
+            "back": self.back_answer,
             "difficulty": self.difficulty,
             "mastery_level": self.mastery_level,
+            "box": self.mastery_level,
             "review_count": self.review_count,
             "next_review_at": self.next_review_at.isoformat() if self.next_review_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None
@@ -328,6 +331,7 @@ class StudyTask(Base):
             "priority": self.priority,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "is_completed": bool(self.is_completed),
+            "completed": bool(self.is_completed),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
