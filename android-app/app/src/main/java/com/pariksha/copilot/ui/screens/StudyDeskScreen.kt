@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,12 +29,15 @@ import com.pariksha.copilot.ui.theme.*
 fun StudyDeskScreen(
     uiState: AppUiState,
     onToggleTask: (String) -> Unit,
+    onAddTask: (String, String, Int, String) -> Unit = { _, _, _, _ -> },
     onLaunchChatWithPrompt: (String) -> Unit,
-    onNavigateToFlashcards: () -> Unit
+    onNavigateToFlashcards: () -> Unit,
+    onNavigateToQuiz: () -> Unit = {}
 ) {
     val completedCount = uiState.tasks.count { it.isCompleted }
     val totalCount = uiState.tasks.size
     val progressPercent = if (totalCount > 0) (completedCount.toFloat() / totalCount.toFloat()) else 0f
+    var showAddTaskDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -184,18 +187,37 @@ fun StudyDeskScreen(
                     )
                 }
 
-                Surface(
-                    color = Emerald500.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Emerald500.copy(alpha = 0.3f))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "${(progressPercent * 100).toInt()}% Done",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Emerald500
-                    )
+                    IconButton(
+                        onClick = { showAddTaskDialog = true },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Blue500.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Task",
+                            tint = Blue400,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Surface(
+                        color = Emerald500.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Emerald500.copy(alpha = 0.3f))
+                    ) {
+                        Text(
+                            text = "${(progressPercent * 100).toInt()}% Done",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Emerald500
+                        )
+                    }
                 }
             }
         }
@@ -203,6 +225,56 @@ fun StudyDeskScreen(
         // Task Items
         items(uiState.tasks, key = { it.id }) { task ->
             TaskCard(task = task, onToggle = { onToggleTask(task.id) })
+        }
+
+        // 2.5 CBT Mock Exam Simulator Banner
+        item {
+            Card(
+                onClick = onNavigateToQuiz,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Amber500.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Timer, "CBT Exam", tint = Amber400, modifier = Modifier.size(24.dp))
+                        }
+                        Column {
+                            Text(
+                                "CBT Mock Examination Simulator",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate100
+                            )
+                            Text(
+                                "${uiState.quizzes.size} Timed Papers Available • Real Negative Marking",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400
+                            )
+                        }
+                    }
+
+                    Icon(Icons.Default.ChevronRight, "Start", tint = Amber400)
+                }
+            }
         }
 
         // 3. Leitner Active Recall Flashcards Banner
@@ -298,6 +370,87 @@ fun StudyDeskScreen(
                 }
             }
         }
+    }
+
+    if (showAddTaskDialog) {
+        var newTaskTitle by remember { mutableStateOf("") }
+        var newTaskSubject by remember { mutableStateOf("DBMS") }
+        var newTaskMinutes by remember { mutableStateOf("30") }
+        val newTaskPriority = "High"
+
+        AlertDialog(
+            onDismissRequest = { showAddTaskDialog = false },
+            title = {
+                Text("Add Preparation Task", fontWeight = FontWeight.Bold, color = Slate100)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = newTaskTitle,
+                        onValueChange = { newTaskTitle = it },
+                        label = { Text("Task Description") },
+                        placeholder = { Text("e.g. Revise Distributed Systems") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Slate100,
+                            unfocusedTextColor = Slate200,
+                            focusedBorderColor = Blue500,
+                            unfocusedBorderColor = Slate700
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text("Subject Area", style = MaterialTheme.typography.labelSmall, color = Slate400)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        listOf("DBMS", "Networks", "Securities", "Quant").forEach { subj ->
+                            FilterChip(
+                                selected = newTaskSubject == subj,
+                                onClick = { newTaskSubject = subj },
+                                label = { Text(subj, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newTaskMinutes,
+                        onValueChange = { str -> newTaskMinutes = str.filter { it.isDigit() } },
+                        label = { Text("Duration (Minutes)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Slate100,
+                            unfocusedTextColor = Slate200,
+                            focusedBorderColor = Blue500,
+                            unfocusedBorderColor = Slate700
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newTaskTitle.isNotBlank()) {
+                            val mins = newTaskMinutes.toIntOrNull() ?: 30
+                            onAddTask(newTaskTitle.trim(), newTaskSubject, mins, newTaskPriority)
+                            showAddTaskDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Blue500)
+                ) {
+                    Text("Add Task", color = Slate950, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddTaskDialog = false }) {
+                    Text("Cancel", color = Slate400)
+                }
+            },
+            containerColor = Slate900,
+            tonalElevation = 6.dp
+        )
     }
 }
 

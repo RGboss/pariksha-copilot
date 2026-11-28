@@ -69,6 +69,25 @@ def health_check():
     """Health check endpoint for platform monitoring."""
     return {"status": "ok", "app": "pariksha-copilot", "version": "2.3.0"}
 
+@app.get("/download/app-debug.apk")
+@app.get("/api/download/apk")
+def download_android_apk():
+    """Serves the latest Pariksha Copilot Android APK for mobile devices."""
+    candidates = [
+        os.path.join(BASE_DIR, "release", "pariksha-copilot.apk"),
+        os.path.join(BASE_DIR, "android-app", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+        os.path.join(BASE_DIR, "release", "app-debug.apk"),
+        os.path.join(BASE_DIR, "app-debug.apk")
+    ]
+    for apk_path in candidates:
+        if os.path.exists(apk_path):
+            return FileResponse(
+                path=apk_path,
+                filename="pariksha-copilot.apk",
+                media_type="application/vnd.android.package-archive"
+            )
+    raise HTTPException(status_code=404, detail="Android APK not found on server")
+
 UPLOADS_DIR = os.environ.get("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 

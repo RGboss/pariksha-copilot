@@ -34,6 +34,9 @@ node_modules/
 
 # Logs
 *.log
+/*.png
+/*.xml
+/*.txt
 
 # Editor & OS files
 .vscode/
@@ -50,6 +53,7 @@ android-app/build/
 android-app/app/build/
 local.properties
 *.apk
+!release/pariksha-copilot.apk
 *.aab
 *.zip
 jdk-17/

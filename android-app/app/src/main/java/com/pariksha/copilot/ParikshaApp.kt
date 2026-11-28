@@ -5,10 +5,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +22,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pariksha.copilot.ui.screens.AuthScreen
 import com.pariksha.copilot.ui.screens.ChatScreen
 import com.pariksha.copilot.ui.screens.FlashcardsScreen
+import com.pariksha.copilot.ui.screens.QuizScreen
 import com.pariksha.copilot.ui.screens.SettingsScreen
 import com.pariksha.copilot.ui.screens.StudyDeskScreen
 import com.pariksha.copilot.ui.theme.*
@@ -31,6 +34,7 @@ enum class AppTab(
 ) {
     DESK("Study Desk", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
     CHAT("AI Tutor", Icons.Filled.Chat, Icons.Outlined.Chat),
+    QUIZ("Mock CBT", Icons.Filled.Quiz, Icons.Outlined.Quiz),
     CARDS("Flashcards", Icons.Filled.Style, Icons.Outlined.Style),
     SETTINGS("Profile", Icons.Filled.Person, Icons.Outlined.Person)
 }
@@ -99,11 +103,13 @@ fun ParikshaApp(
                 AppTab.DESK -> StudyDeskScreen(
                     uiState = uiState,
                     onToggleTask = viewModel::toggleTask,
+                    onAddTask = viewModel::addTask,
                     onLaunchChatWithPrompt = { query ->
                         viewModel.sendMessage(query)
                         selectedTab = AppTab.CHAT
                     },
-                    onNavigateToFlashcards = { selectedTab = AppTab.CARDS }
+                    onNavigateToFlashcards = { selectedTab = AppTab.CARDS },
+                    onNavigateToQuiz = { selectedTab = AppTab.QUIZ }
                 )
                 AppTab.CHAT -> ChatScreen(
                     uiState = uiState,
@@ -111,6 +117,17 @@ fun ParikshaApp(
                     onClearChat = viewModel::clearChat,
                     onDismissError = viewModel::clearError,
                     onNavigateToSettings = { selectedTab = AppTab.SETTINGS }
+                )
+                AppTab.QUIZ -> QuizScreen(
+                    uiState = uiState,
+                    onStartQuiz = viewModel::startQuiz,
+                    onSelectOption = viewModel::selectQuizOption,
+                    onNextQuestion = viewModel::nextQuizQuestion,
+                    onPrevQuestion = viewModel::prevQuizQuestion,
+                    onJumpToQuestion = viewModel::jumpToQuizQuestion,
+                    onSubmitQuiz = viewModel::submitQuiz,
+                    onRetakeQuiz = viewModel::retakeCurrentQuiz,
+                    onExitQuiz = viewModel::exitQuiz
                 )
                 AppTab.CARDS -> FlashcardsScreen(
                     uiState = uiState,
